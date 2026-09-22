@@ -1,0 +1,184 @@
+:root {
+  --bg: #0f1115;
+  --panel: #161a21;
+  --panel2: #1d232c;
+  --line: #2a323e;
+  --text: #e6edf3;
+  --muted: #8b98a5;
+  --accent: #3b82f6;
+  --accent2: #2563eb;
+  --ok: #22c55e;
+  --danger: #ef4444;
+  --radius: 10px;
+  font-size: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+}
+#app { height: 100vh; }
+h1, h2, p { margin: 0; }
+.muted { color: var(--muted); }
+.center { text-align: center; }
+.xs { font-size: 12px; }
+
+.login {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: radial-gradient(1200px 600px at 50% -10%, #1b2740 0%, var(--bg) 60%);
+}
+.login h1 { font-size: 28px; letter-spacing: 2px; }
+.login-form { display: flex; gap: 8px; margin-top: 8px; }
+
+.app-layout {
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100vh;
+}
+
+/* —— 侧边栏 —— */
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 260px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 12px;
+  overflow-y: auto;
+}
+.profile-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.self-name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn { font-size: 11px; padding: 2px 7px; border-radius: 20px; background: #253; color: var(--ok); }
+.conn[data-on="false"] { background: #332; color: #ff9; }
+.nav-section { display: flex; flex-direction: column; gap: 6px; }
+.nav-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.nav-list { display: flex; flex-direction: column; gap: 3px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+}
+.nav-item:hover { background: var(--panel2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.dot[data-via="relay"] { background: #f59e0b; font-size: 0; }
+.group-mark { color: var(--accent); font-weight: 700; }
+.item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-meta { font-size: 11px; color: var(--muted); }
+.nav-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* —— 主面板 —— */
+.chat {
+  margin-left: 260px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.chat-head { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.chat-title { font-weight: 600; }
+.stream { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+
+.msg { display: flex; flex-direction: column; max-width: 70%; }
+.msg.mine { align-self: flex-end; align-items: flex-end; }
+.msg.theirs { align-self: flex-start; align-items: flex-start; }
+.msg-meta { display: flex; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.bubble { padding: 8px 12px; border-radius: 12px; background: var(--panel2); line-height: 1.5; }
+.msg.mine .bubble { background: var(--accent2); color: #fff; }
+.text { white-space: pre-wrap; word-break: break-word; }
+.media { max-width: 320px; max-height: 240px; border-radius: 8px; margin-top: 4px; }
+.file-card { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+.file-name { font-weight: 600; word-break: break-all; }
+.file-size { font-size: 12px; color: var(--muted); }
+.file-dl { color: var(--accent); font-size: 13px; text-decoration: none; }
+.file-dl:hover { text-decoration: underline; }
+.xfer-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.xfer-label { color: var(--muted); }
+.xfer-track { height: 6px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; }
+.xfer-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width .15s linear; }
+.xfer-cancel { color: var(--danger); border-color: var(--danger); }
+.sha-ok { color: var(--ok); font-size: 12px; }
+.sha-bad { color: var(--danger); font-size: 12px; }
+.fail { color: var(--danger); font-size: 12px; }
+
+/* —— 输入栏 —— */
+.composer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--line);
+}
+
+/* —— 表单/按钮 —— */
+.im-input {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  padding: 9px 12px; border-radius: 8px; outline: none; width: 100%;
+}
+.im-input:focus { border-color: var(--accent); }
+.im-input.grow { flex: 1; }
+.im-btn {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  padding: 9px 14px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.im-btn:hover { filter: brightness(1.15); }
+.im-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.im-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.im-btn.ghost { background: transparent; }
+.im-btn.xs { padding: 7px 10px; font-size: 12px; }
+.im-btn.sm { padding: 9px 12px; }
+.link-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 4px; }
+.link-btn:hover { color: var(--text); }
+
+/* —— 通话浮层 —— */
+.call-wrap { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+.call-wrap .overlay {
+  pointer-events: auto; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55);
+}
+.call-card {
+  width: 560px; padding: 20px; border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.call-card.live.video { width: 720px; }
+.call-card.live.share { width: min(88vw, 1080px); } /* 共享桌面近全屏 */
+.call-title { font-size: 16px; font-weight: 600; text-align: center; }
+.call-actions { display: flex; justify-content: center; gap: 10px; }
+.vids { position: relative; height: 300px; border-radius: 10px; background: var(--panel2); overflow: hidden; }
+.vids.share { height: min(56vh, 520px); }
+.vid { position: absolute; object-fit: contain; width: 100%; height: 100%; }
+.vid.local { right: 10px; top: 10px; width: 30%; height: 30%; border: 1px solid var(--line); border-radius: 8px; }
+/* 对方尚未发画面时给主画面铺占位底 */
+.call-card.live.no-stream .vid.main { background: repeating-linear-gradient(45deg,#181d26,#181d26 8px,#1e242f 8px,#1e242f 16px); }
+.vid[hidden] { display: none; }
+.audio-indicator { display: flex; align-items: center; justify-content: center; gap: 10px; height: 180px; color: var(--muted); }
+.pulse-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--ok); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(0,255,140,.45);} 50% { box-shadow: 0 0 0 10px rgba(0,255,140,0);} }
+.remote-panel { display: flex; flex-direction: column; gap: 8px; }
+.remote-canvas { height: 220px; border: 1px dashed var(--line); border-radius: 8px; cursor: crosshair; background: repeating-linear-gradient(45deg,#181d26,#181d26 8px,#1e242f 8px,#1e242f 16px); tabindex: 0; }
+.remote-bar { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; }
+.remote-bar .xs { color: var(--muted); }
+.call-card.live.remote .vid.main { cursor: crosshair; outline: none; }
+.call-card.live.remote .vid.main:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 群共享房主控制条：观众列表(可踢出) + 停止请求待办 */
+.share-bar { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.share-bar-head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 600; }
+.share-members { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.share-member { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 4px 8px; background: var(--panel2); border-radius: 8px; }
+.share-req { display: flex; align-items: center; gap: 8px; font-size: 13px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.share-req span { flex: 1; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #1b2530; border: 1px solid var(--line); color: var(--text);
+  padding: 10px 18px; border-radius: 20px; z-index: 99;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
+}
