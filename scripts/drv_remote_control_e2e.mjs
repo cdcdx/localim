@@ -127,8 +127,8 @@ async function main() {
     const bId = await aCdp.ev(`(() => { const L=window.__localim; return L?([...L.app.state.peers.keys()].filter(Boolean)[0]||''):''; })()`);
     await waitFor(bCdp, `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>0; })()`, 40, 400);
     const aId = await bCdp.ev(`(() => { const L=window.__localim; return L?([...L.app.state.peers.keys()].filter(Boolean)[0]||''):''; })()`);
-    console.log('[0] 互发现 A→B=%s B→A=%s', bId, aId);
-    if (!bId || !aId || bId === aId) throw new Error('互发现失败');
+    console.log('[0] mutual discovery A->B=%s B->A=%s', bId, aId);
+    if (!bId || !aId || bId === aId) throw new Error('mutual discovery failed');
 
     // 预热：A→B 传一个小文件迫使持久 peer 通道建立（冷启动拨号/信令中继更可靠）。
     const warm = await (async () => {
@@ -139,15 +139,15 @@ async function main() {
         for(const [,arr] of L.app.state.conversations) for(const it of arr)
           if(it.mediaRef && it.mediaRef.name==='warm.bin' && it.xfer && it.xfer.phase==='done') return true; return false; })()`, 60, 500);
     })();
-    console.log('[0.5] 预热文件传输:', warm ? 'OK' : 'FAIL');
+    console.log('[0.5] warmup file transfer:', warm ? 'OK' : 'FAIL');
 
     // 阶段1：A(被控) 发起远程 remote；A 共享自身标签 + 开 data channel + 武装 daemon
     const start = await aCdp.ev(`(async () => {
       const L=window.__localim; try { const s=await L.startCall(${JSON.stringify(bId)},'remote'); return {ok:true,callId:s.callId}; }
       catch(e){ return {ok:false,err:String(e)}; }
     })()`);
-    console.log('[1] A 发起远程控制:', JSON.stringify(start));
-    if (!start?.ok) throw new Error('远程发起失败 ' + JSON.stringify(start));
+    console.log('[1] A started remote control:', JSON.stringify(start));
+    if (!start?.ok) throw new Error('failed to start remote control ' + JSON.stringify(start));
     const sid = start.callId;
 
     // B(操控端) 等 offer 抵达再接听（与视频/共享同理）
@@ -155,8 +155,8 @@ async function main() {
     const acc = await bCdp.ev(`(async () => { const L=window.__localim;
       try { await L.acceptIncomingCall(${JSON.stringify(sid)},'remote',${JSON.stringify(aId)}); return {ok:true}; }
       catch(e){ return {ok:false,err:String(e)}; } })()`);
-    console.log('[2] B 接听远程:', JSON.stringify(acc));
-    if (!acc?.ok) throw new Error('接听失败 ' + JSON.stringify(acc));
+    console.log('[2] B answered remote:', JSON.stringify(acc));
+    if (!acc?.ok) throw new Error('failed to answer ' + JSON.stringify(acc));
 
     // 等两端 connected 且含视频轨道
     const waitConnected = async (cdp, label) => {
@@ -167,7 +167,7 @@ async function main() {
           if (o.sessions.some(x => x.pc === 'connected' && (x.remote.includes('video') || x.local.includes('video')))) return o; }
         await wait(500);
       }
-      console.error(`[!] ${label} 30s 未 connected`); return null;
+      console.error(`[!] ${label} not connected within 30s`); return null;
     };
     let sA = await waitConnected(aCdp, 'A');
     let sB = await waitConnected(bCdp, 'B');
@@ -175,13 +175,13 @@ async function main() {
     if (!sB) sB = JSON.parse(await bCdp.ev(mediaSnapExpr()) || 'null');
     const aShare = sA?.sessions.some(x => x.local.includes('video')) === true;
     const bViewer = sB?.sessions.some(x => x.remote.includes('video')) === true;
-    console.log('[3] 连接: A(宿主共享本地视频)=%s B(操控端远端视频)=%s', aShare, bViewer);
+    console.log('[3] connected: A (host sharing local video)=%s B (controller viewing remote video)=%s', aShare, bViewer);
     console.log('   A=', JSON.stringify(sA && sA.sessions), ' B=', JSON.stringify(sB && sB.sessions));
-    if (!(aShare && bViewer)) throw new Error('远程连接未建立');
+    if (!(aShare && bViewer)) throw new Error('remote connection not established');
 
     // B 主画面应绑上远程流（media.ts 远程面板已挂到主 video）
     const bDom = await waitFor(bCdp, `(() => { const m=document.querySelector('.vid.main'); return !!(m && m.srcObject && m.videoWidth>0); })()`, 30, 300);
-    console.log('[4] B 主画面绑定远程流:', bDom ? 'OK' : 'FAIL');
+    console.log('[4] B main view bound to remote stream:', bDom ? 'OK' : 'FAIL');
 
     // 阶段2：B(操控端) 经 data channel 回传输入 → A(被控) 转发本机 daemon
     const evs = [
@@ -200,8 +200,8 @@ async function main() {
     const got = await waitFor(aCdp, `window.__recInput && window.__recInput.length>=${evs.length}`, 40, 300);
     const rec = await aCdp.ev(`window.__recInput ? JSON.stringify({n:window.__recInput.length, first:window.__recInput[0], key:window.__recInput.find(e=>e.t==='keydown'), wheel:window.__recInput.find(e=>e.t==='wheel')}) : 'none'`);
     const hosted = await aCdp.ev(`window.__recHost === true ? 'true' : String(window.__recHost)`);
-    console.log('[5] A 转发 remote_input:', got ? `OK(${evs.length} 条)` : 'FAIL', ' hosted=', hosted);
-    console.log('   采样:', rec);
+    console.log('[5] A forwarded remote_input:', got ? `OK(${evs.length})` : 'FAIL', ' hosted=', hosted);
+    console.log('   samples:', rec);
 
     // daemon 日志确认注入执行（被控 daemon：media.remote_input ... injected=1）
     let injected = false; let injLine = '';
@@ -210,7 +210,7 @@ async function main() {
       const m = t.match(/media\.remote_input[^\n]*injected=1/);
       if (m) { injected = true; injLine = m[0].slice(0, 150); }
     } catch {}
-    console.log('[6] 被控 daemon 注入日志:', injected ? `OK: ${injLine}` : '未匹配(下面打印 a.log 中 remote_input 相关上下文)');
+    console.log('[6] host daemon injection log:', injected ? `OK: ${injLine}` : 'no match (printing remote_input context from a.log below)');
     if (!injected) {
       try {
         const t = require_fs_read(join(da, 'a.log'), 'utf8');
@@ -220,7 +220,7 @@ async function main() {
     }
 
     const pass = aShare && bViewer && bDom && got && hosted === 'true';
-    console.log('=== 阶段2 远程控制:', pass && injected ? 'OK（输入经 B→data channel→A→daemon.rest_input→input_injector 全链路）' : '=== 远程控制: FAIL（plumbing 通但注入未确认 / 转发失败）', '===');
+    console.log('=== phase 2 remote control:', pass && injected ? 'OK (full chain: B -> data channel -> A -> daemon.rest_input -> input_injector)' : '=== remote control: FAIL (plumbing works but injection unconfirmed / forwarding failed)', '===');
     await aCdp.ev(`window.__localim.hangupDebug(); void 0;`);
 
     await cleanup();

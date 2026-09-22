@@ -73,7 +73,7 @@ async function main() {
     if (ids) { const arr = ids.split(',').filter(Boolean).map(x => x.trim()); if (arr.length > 0) { bId = arr[0]; ok = true; } }
     if (!ok) await wait(600);
   }
-  console.log('[1] A 发现对端:', ok ? 'OK deviceId=' + bId : 'FAIL');
+  console.log('[1] A discovered peer:', ok ? 'OK deviceId=' + bId : 'FAIL');
   if (!ok) {
     const aState = await aCdp.ev(`(() => { const L=window.__localim; if(!L) return 'NOAPP'; return JSON.stringify({connected:L.app.state.connected, profile:L.app.state.profile, peers:[...L.app.state.peers].map(([k,v])=>k+':'+v?.name)}) })()`);
     const bState = await bCdp.ev(`(() => { const L=window.__localim; if(!L) return 'NOAPP'; return JSON.stringify({connected:L.app.state.connected, profile:L.app.state.profile, peers:[...L.app.state.peers].map(([k,v])=>k+':'+v?.name)}) })()`);
@@ -90,7 +90,7 @@ async function main() {
     await L.sendFileTo(bId, file, 'file');
     return { ok:true, bId, size:bytes.length };
   })()`);
-  console.log('[2] A 发起 sendFileTo:', JSON.stringify(send));
+  console.log('[2] A calls sendFileTo:', JSON.stringify(send));
   if (!send || !send.ok) { console.error('FAIL send', send); process.exit(1); }
 
   // B 页断言：等待收到文件消息（Type=file, mediaRef.name=bench-bin.bin）
@@ -105,9 +105,9 @@ async function main() {
     })()`);
     if (!got) await wait(700);
   }
-  console.log('[3] B 收到文件消息:', got ? JSON.stringify(got) : 'NONE');
+  console.log('[3] B received file message:', got ? JSON.stringify(got) : 'NONE');
   const pass = !!got && got.name === 'bench-bin.bin' && got.size === 256 * 1024;
-  console.log('=== 文件分片端到端 ' + (pass ? 'OK：A 经 WebRTC data channel 传输，B 重组完整并展示' : 'FAIL') + ' ===');
+  console.log('=== file chunking e2e ' + (pass ? 'OK: A sent over WebRTC data channel, B reassembled and displayed it' : 'FAIL') + ' ===');
 
   try { pa.kill(); pb.kill(); } catch {}
   await wait(1200);

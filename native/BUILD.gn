@@ -72,7 +72,9 @@ static_library("localim_core") {
     libs = [ "user32.lib" ]
   } else if (is_mac) {
     sources += [ "platform/input_injector_mac.mm" ]
-    libs = [ "Quartz.framework" ]
+    # macOS framework 必须走 frameworks（GN 禁止在 libs 里写 *.framework），
+    # 会展开为 -framework CoreGraphics（CGEvent 属于 CoreGraphics，非 Quartz）。
+    frameworks = [ "CoreGraphics.framework" ]
   } else if (is_linux) {
     sources += [ "platform/input_injector_linux.cc" ]
     libs = [ "X11", "Xtst" ]

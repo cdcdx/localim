@@ -17,8 +17,8 @@ ws.onopen = async () => {
   const cases = [
     ['identity', 'hello', {}],
     ['roster', 'list', {}],
-    ['room', 'create', { name: '测试群' }],
-    ['message', 'send', { kind: 'text', text: '你好，局域网！', channel: 'chat', to: '*' }],
+    ['room', 'create', { name: 'Test Group' }],
+    ['message', 'send', { kind: 'text', text: 'hello LAN!', channel: 'chat', to: '*' }],
     ['discovery', 'scan_start', {}],
     ['nope', 'nope', {}],
   ];

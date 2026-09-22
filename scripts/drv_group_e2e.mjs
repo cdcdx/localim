@@ -105,8 +105,8 @@ async function main() {
     const bId = await aCdp.ev(`(() => { const L=window.__localim; return L?([...L.app.state.peers.keys()].filter(Boolean)[0]||''):''; })()`);
     await waitFor(bCdp, `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>0; })()`, 40, 400);
     const aId = await bCdp.ev(`(() => { const L=window.__localim; return L?([...L.app.state.peers.keys()].filter(Boolean)[0]||''):''; })()`);
-    console.log('[0] 互发现 A→B=%s B→A=%s', bId, aId);
-    if (!bId || !aId || bId === aId) throw new Error('互发现失败');
+    console.log('[0] mutual discovery A->B=%s B->A=%s', bId, aId);
+    if (!bId || !aId || bId === aId) throw new Error('mutual discovery failed');
 
     // 预热：A→B 传一个小文件，先建立对端 peer 通道(后续 invite/群广播走复用的 outgoing 连接)。
     const warm = await (async () => {
@@ -117,49 +117,49 @@ async function main() {
         for(const [,arr] of L.app.state.conversations) for(const it of arr)
           if(it.mediaRef && it.mediaRef.name==='warm.bin' && it.xfer && it.xfer.phase==='done') return true; return false; })()`, 60, 500);
     })();
-    console.log('[0.5] 预热文件传输:', warm ? 'OK' : 'FAIL');
+    console.log('[0.5] warmup file transfer:', warm ? 'OK' : 'FAIL');
 
     // 阶段1a: A 建群
-    const created = await aCdp.ev(`(() => window.__localim.native.request('room','create',{name:'技术组'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`);
+    const created = await aCdp.ev(`(() => window.__localim.native.request('room','create',{name:'Tech Group'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`);
     const roomId = JSON.parse(created).roomId;
-    console.log('[1] A 建群:', created, ' roomId=', roomId);
-    if (!roomId) throw new Error('建群失败');
+    console.log('[1] A created group:', created, ' roomId=', roomId);
+    if (!roomId) throw new Error('failed to create group');
 
     // 阶段1b: A 邀请 B
     const inv = await aCdp.ev(`(() => window.__localim.native.request('room','invite',{roomId:${JSON.stringify(roomId)},to:${JSON.stringify(bId)}}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`);
-    console.log('[2] A 邀请 B:', inv);
+    console.log('[2] A invited B:', inv);
     // B 端应收到 room.invited 并在 rooms map 出现该群，成员=[A,B]
     const bGotRoom = await waitFor(bCdp, `(() => { const L=window.__localim; const r=L&&L.app.state.rooms.get(${JSON.stringify(roomId)}); return !!(r && r.members && r.members.includes(${JSON.stringify(aId)})); })()`, 40, 300);
     const bRoom = await bCdp.ev(`(() => { const r=window.__localim.app.state.rooms.get(${JSON.stringify(roomId)}); return r ? JSON.stringify({name:r.name,owner:r.owner,members:r.members}) : 'none'; })()`);
     const aRoomM = await aCdp.ev(`(() => { const r=window.__localim.app.state.rooms.get(${JSON.stringify(roomId)}); return r ? JSON.stringify(r.members) : 'none'; })()`);
-    console.log('[3] B 端收到群:', bGotRoom ? 'OK' : 'FAIL', bRoom, ' A端成员=', aRoomM);
-    if (!bGotRoom) throw new Error('B 未收到 invited');
+    console.log('[3] B got group:', bGotRoom ? 'OK' : 'FAIL', bRoom, ' A members=', aRoomM);
+    if (!bGotRoom) throw new Error('B did not receive invited');
 
     // 阶段2a: A 发群消息 -> B 收到
     const msgA = 'hello from A';
     await aCdp.ev(`window.__localim.native.send('message','send',{kind:'room',type:'text',to:${JSON.stringify(roomId)},body:${JSON.stringify(msgA)},nonce:'g-a-1',ts:Date.now()}); void 0;`);
     const bGotMsg = await waitFor(bCdp, `(() => { const L=window.__localim; const arr=L&&L.app.state.conversations.get(${JSON.stringify(roomId)}); return !!(arr && arr.some(x=>x.body===${JSON.stringify(msgA)})); })()`, 40, 300);
-    console.log('[4] A→B 群消息:', bGotMsg ? 'OK' : 'FAIL');
+    console.log('[4] A->B group message:', bGotMsg ? 'OK' : 'FAIL');
 
     // 阶段2b: B 回群消息 -> A 收到
     const msgB = 'hello from B';
     await bCdp.ev(`window.__localim.native.send('message','send',{kind:'room',type:'text',to:${JSON.stringify(roomId)},body:${JSON.stringify(msgB)},nonce:'g-b-1',ts:Date.now()}); void 0;`);
     const aGotMsg = await waitFor(aCdp, `(() => { const L=window.__localim; const arr=L&&L.app.state.conversations.get(${JSON.stringify(roomId)}); return !!(arr && arr.some(x=>x.body===${JSON.stringify(msgB)})); })()`, 40, 300);
-    console.log('[5] B→A 群消息:', aGotMsg ? 'OK' : 'FAIL');
+    console.log('[5] B->A group message:', aGotMsg ? 'OK' : 'FAIL');
 
     // 阶段3: A 群历史含双向
     await aCdp.ev(`window.__localim.native.loadHistory(${JSON.stringify(roomId)},'room'); void 0;`);
     const hist = await waitFor(aCdp, `(() => { const arr=window.__localim.app.state.conversations.get(${JSON.stringify(roomId)}); if(!arr) return false;
       return arr.some(x=>x.body===${JSON.stringify(msgA)}) && arr.some(x=>x.body===${JSON.stringify(msgB)}); })()`, 30, 300);
     const histDump = await aCdp.ev(`(() => { const arr=window.__localim.app.state.conversations.get(${JSON.stringify(roomId)})||[]; return JSON.stringify(arr.map(x=>x.body)); })()`);
-    console.log('[6] A 群历史(双向):', hist ? 'OK' : 'FAIL', histDump);
+    console.log('[6] A group history (both directions):', hist ? 'OK' : 'FAIL', histDump);
 
     // 阶段4: B 确认 daemon 成员表已同步（可广播）
     const bMembers = await bCdp.ev(`(() => { const m=window.__localim.app.state.rooms.get(${JSON.stringify(roomId)}); return m?JSON.stringify({members:m.members,owner:m.owner}):'none'; })()`);
-    console.log('[7] B 端群成员表:', bMembers);
+    console.log('[7] B group member list:', bMembers);
 
     const pass = bGotRoom && bGotMsg && aGotMsg && hist;
-    console.log('=== 群聊模式: ' + (pass ? 'PASS（建群→邀请→成员同步→双向群消息→历史全链路）' : 'FAIL') + ' ===');
+    console.log('=== group chat mode: ' + (pass ? 'PASS (create -> invite -> member sync -> bidirectional group messages -> history, full chain)' : 'FAIL') + ' ===');
 
     await cleanup();
     process.exit(pass ? 0 : 3);

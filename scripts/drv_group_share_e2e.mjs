@@ -111,9 +111,9 @@ async function main() {
     const online = () => `(() => { const L=window.__localim; return L?[...L.app.state.peers.keys()].filter(Boolean).length:0; })()`;
     for (const [name, cd] of [['A', a], ['B', b], ['C', c]]) {
       const ok = await waitFor(cd, `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>=2; })()`, 60, 400);
-      if (!ok) throw new Error(`${name} 互发现未达两台`);
+      if (!ok) throw new Error(`${name} did not discover both peers`);
     }
-    console.log('[0] 互发现 A/B/C 各自在线 peer 数 = 各≥2');
+    console.log('[0] mutual discovery: A/B/C each have >=2 online peers');
     for (const [n, cd] of [['A', a], ['B', b], ['C', c]]) {
       console.log(`[dbg] ${n} peers=`, await cd.ev(`JSON.stringify([...window.__localim.app.state.peers.keys()].filter(Boolean))`));
     }
@@ -125,7 +125,7 @@ async function main() {
     const hello = (cd) => cd.ev(`(() => window.__localim.native.request('identity','hello',{}).then(r=>JSON.stringify({id:r.deviceId,name:r.name})).catch(e=>'ERR:'+e))()`)
       .then((s) => JSON.parse(s).id);
     const [aId, bId, cId] = await Promise.all([hello(a), hello(b), hello(c)]);
-    console.log('[0.5] daemon 身份 A=%s B=%s C=%s', (aId||'').slice(0,8), (bId||'').slice(0,8), (cId||'').slice(0,8));
+    console.log('[0.5] daemon identity A=%s B=%s C=%s', (aId||'').slice(0,8), (bId||'').slice(0,8), (cId||'').slice(0,8));
     async function warmup(targetId, cdRecv) {
       for (let i = 0; i < 12; i++) {
         const warmName = `warm${i}.bin`;
@@ -141,23 +141,23 @@ async function main() {
     }
     const wB = await warmup(bId, b);
     const wC = await warmup(cId, c);
-    console.log('[0.5] 预热 A→B=%s A→C=%s', wB, wC);
-    if (!wB || !wC) throw new Error('预热连接未建立');
+    console.log('[0.5] warmup A->B=%s A->C=%s', wB, wC);
+    if (!wB || !wC) throw new Error('warmup connections not established');
 
     // 阶段1: A 建群(名字借用三个成员 id)并邀请 B、C
-    const created = JSON.parse(await a.ev(`(() => window.__localim.native.request('room','create',{name:'研发组'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
+    const created = JSON.parse(await a.ev(`(() => window.__localim.native.request('room','create',{name:'RD Group'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
     const roomId = created.roomId;
-    if (!roomId) throw new Error('建群失败');
+    if (!roomId) throw new Error('failed to create group');
     await a.ev(`(() => window.__localim.native.request('room','invite',{roomId:${JSON.stringify(roomId)},to:${JSON.stringify(bId)}}).then(()=>true))()`);
     await a.ev(`(() => window.__localim.native.request('room','invite',{roomId:${JSON.stringify(roomId)},to:${JSON.stringify(cId)}}).then(()=>true))()`);
     // 等 B、C 收到群且成员含三端 daemon id
     const gotRoom = (cd) => `(() => { const L=window.__localim; const r=L && L.app.state.rooms.get(${JSON.stringify(roomId)}); if(!r) return false; const m=r.members||[];
       return m.includes(${JSON.stringify(aId)}) && m.includes(${JSON.stringify(bId)}) && m.includes(${JSON.stringify(cId)}); })()`;
     for (const [n, cd] of [['B', b], ['C', c]]) {
-      if (!(await waitFor(cd, gotRoom(cd), 60, 400))) throw new Error(`${n} 未收到完整群成员表`);
+      if (!(await waitFor(cd, gotRoom(cd), 60, 400))) throw new Error(`${n} did not receive the full group member list`);
     }
     const aRoom = JSON.parse(await a.ev(`(() => JSON.stringify(window.__localim.app.state.rooms.get(${JSON.stringify(roomId)}).members))()`));
-    console.log('[1] 建群+邀请: roomId=%s   A成员数=%d, B/C 均收到（含 A/B/C）', roomId, aRoom.length);
+    console.log('[1] group created + invited: roomId=%s   A member count=%d, B/C both received it (A/B/C included)', roomId, aRoom.length);
 
     // 阶段2: A 发起群共享
     const started = JSON.parse(await a.ev(`(() => window.__localim.startRoomShare(${JSON.stringify(roomId)}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
@@ -182,7 +182,7 @@ async function main() {
     }
     const bCall = await accept(b);
     const cCall = await accept(c);
-    console.log('[3] B 接听 callId=%s, C 接听 callId=%s', bCall, cCall);
+    console.log('[3] B answered callId=%s, C answered callId=%s', bCall, cCall);
 
     // 阶段3: B、C 各 PeerConnection connected 且有远端 video 轨道
     async function viewerConnected(cd) {
@@ -193,8 +193,8 @@ async function main() {
     // B/C 主画面绑上远端流（videoWidth>0 表示有真实帧）
     const bW = await waitFor(b, `(() => { const v=document.querySelector('.vid.main'); return v && v.videoWidth>0; })()`, 60, 400);
     const cW = await waitFor(c, `(() => { const v=document.querySelector('.vid.main'); return v && v.videoWidth>0; })()`, 60, 400);
-    console.log('[4] B 收屏: conn=%s videoWidth>0=%s | C 收屏: conn=%s videoWidth>0=%s', bOk, bW, cOk, cW);
-    if (!(bOk && bW && cOk && cW)) throw new Error('观众未收屏');
+    console.log('[4] B receiving screen: conn=%s videoWidth>0=%s | C receiving screen: conn=%s videoWidth>0=%s', bOk, bW, cOk, cW);
+    if (!(bOk && bW && cOk && cW)) throw new Error('viewer did not receive the shared screen');
 
     // 房主 A 同时保有 2 条共享会话(peerId=B、C)且本端预览本地屏幕
     const aDebug = await a.ev('(() => JSON.stringify(window.__localim.mediaDebug()))()');
@@ -202,38 +202,38 @@ async function main() {
     const aShareP2p = aSessions.filter((s) => s.mode === 'share').map((s) => s.peerId);
     const aViewers = await a.ev(`window.__localim.roomShareViewerCount(${JSON.stringify(roomId)})`);
     const aLocalW = await waitFor(a, `(() => { const v=document.querySelector('.vid.main'); return v && v.videoWidth>0; })()`, 40, 400);
-    console.log('[5] A 侧共享会话=%j  viewerCount=%s  本端预览=%s', aShareP2p, aViewers, aLocalW);
-    if (aViewers !== 2) throw new Error('A 端观众计数应为 2');
+    console.log('[5] A sharing sessions=%j  viewerCount=%s  local preview=%s', aShareP2p, aViewers, aLocalW);
+    if (aViewers !== 2) throw new Error('A viewer count should be 2');
 
     // 阶段4a: 音频同步 —— A 的共享会话本地轨道应含 video(必然) 与 audio(若无头环境支持采集)
     const aShareTracks = JSON.parse(await a.ev(`(() => JSON.stringify(window.__localim.mediaDebug().filter(s=>s.mode==='share').map(s=>s.localTracks)))()`));
     const hasVideo = aShareTracks.length > 0 && aShareTracks[0].includes('video');
     const hasAudio = aShareTracks.length > 0 && aShareTracks[0].includes('audio');
-    console.log('[7] A 共享会话本地轨道=%j  video=%s  audio=%s(无头环境不支持系统音频会回退纯画面，属正常)', aShareTracks, hasVideo, hasAudio);
-    if (!hasVideo) throw new Error('共享流缺少视频轨道');
+    console.log('[7] A sharing local tracks=%j  video=%s  audio=%s (headless may fall back to video-only, that is expected)', aShareTracks, hasVideo, hasAudio);
+    if (!hasVideo) throw new Error('shared stream is missing a video track');
 
     // 阶段4b: 房主踢单个观众 —— endRoomShareViewer(roomId,B) → B 浮层消失、观众数 1、C 仍在线
     const kickOk = await a.ev(`window.__localim.endRoomShareViewer(${JSON.stringify(roomId)}, ${JSON.stringify(bId)})`);
     const bGoneKick = await waitFor(b, `(() => window.__localim.app.state.media === null)()`, 40, 300);
     const aViewersAfterKick = await a.ev(`window.__localim.roomShareViewerCount(${JSON.stringify(roomId)})`);
     const cStill = await c.ev(`(() => { const m=window.__localim.app.state.media; const v=document.querySelector('.vid.main'); return m!==null && v && v.videoWidth>0; })()`);
-    console.log('[8] 房主踢 B: kick=%s B浮层消失=%s 观众数=%s(期望1)  观众C仍在=%s', kickOk, bGoneKick, aViewersAfterKick, cStill);
-    if (!(kickOk && bGoneKick && aViewersAfterKick === 1 && cStill)) throw new Error('踢出观众失败');
+    console.log('[8] host kicked B: kick=%s B overlay gone=%s viewer count=%s (expect 1)  viewer C still in=%s', kickOk, bGoneKick, aViewersAfterKick, cStill);
+    if (!(kickOk && bGoneKick && aViewersAfterKick === 1 && cStill)) throw new Error('failed to kick the viewer');
 
     // 阶段4c: 观众请求停止(谁可停共享=房主决定) —— C 请求 → 房主 A 收到 shareReq → 同意 → 整场结束
     const reqOk = await c.ev(`window.__localim.requestRoomShareStop(${JSON.stringify(roomId)})`);
     const reqSeen = await waitFor(a, `(() => { const m=window.__localim.app.state.media; return m && m.shareReq && m.shareReq.from===${JSON.stringify(cId)}; })()`, 40, 400);
-    console.log('[9] C 请求停止: 发出=%s  房主A收到shareReq(from=C)=%s', reqOk, reqSeen);
-    if (!reqSeen) throw new Error('房主未收到观众停止请求');
+    console.log('[9] C requested stop: sent=%s  host A got shareReq (from=C)=%s', reqOk, reqSeen);
+    if (!reqSeen) throw new Error('host did not receive the viewer stop request');
     const apOk = await a.ev(`window.__localim.resolveRoomShareStopRequest(${JSON.stringify(roomId)}, ${JSON.stringify(cId)}, true)`);
     const cGoneStop = await waitFor(c, `(() => window.__localim.app.state.media === null)()`, 40, 300);
     const aGoneStop = await waitFor(a, `(() => window.__localim.app.state.media === null)()`, 40, 300);
-    console.log('[10] 房主同意停止: resolve=%s  C浮层消失=%s  A浮层消失=%s', apOk, cGoneStop, aGoneStop);
-    if (!(apOk && cGoneStop && aGoneStop)) throw new Error('同意停止后未全部收敛');
+    console.log('[10] host approved stop: resolve=%s  C overlay gone=%s  A overlay gone=%s', apOk, cGoneStop, aGoneStop);
+    if (!(apOk && cGoneStop && aGoneStop)) throw new Error('not everything settled after approving the stop');
 
     const pass = started.count === 2 && bOk && cOk && bW && cW && aViewers === 2 && aLocalW && hasVideo
       && kickOk && bGoneKick && aViewersAfterKick === 1 && cStill && reqSeen && apOk && cGoneStop && aGoneStop;
-    console.log('=== 群共享桌面: ' + (pass ? 'PASS（单主播 A → 多观众独立通道收屏；音频同步；房主踢观众 + 观众请求停止由房主裁决）' : 'FAIL') + ' ===');
+    console.log('=== group screen sharing: ' + (pass ? 'PASS (single host A -> multiple viewers over dedicated channels; audio sync; host kicks viewer + viewer stop request decided by host)' : 'FAIL') + ' ===');
 
     await cleanup();
     process.exit(pass ? 0 : 3);
@@ -242,7 +242,7 @@ async function main() {
     for (const [lg, tag] of [[join(da, 'a.log'), 'A'], [join(db, 'b.log'), 'B'], [join(dc, 'c.log'), 'C']]) {
       try {
         const t = require_fs_read(lg, 'utf8');
-        const rel = t.split('\n').filter((l) => /media|room signal|SendPeer|dial|未知对端|inbound/.test(l)).slice(-25);
+        const rel = t.split('\n').filter((l) => /media|room signal|SendPeer|dial|unknown peer|inbound/.test(l)).slice(-25);
         if (rel.length) console.error(`--- ${tag}.log (media/peer) ---\n${rel.join('\n')}`);
       } catch {}
     }

@@ -118,11 +118,11 @@ async function main() {
   const aPeer = bPeers[0] || '';
   const aLedger = await aCdp.ev(`(() => window.__localim.app.state.profile?.deviceId || '')()`);
   const bLedger = await bCdp.ev(`(() => window.__localim.app.state.profile?.deviceId || '')()`);
-  console.log('[1] WebUI身份 A=', aLedger, ' B=', bLedger);
+  console.log('[1] WebUI identity A=', aLedger, ' B=', bLedger);
   console.log('   roster: A→', JSON.stringify(allPeers), ' B→', JSON.stringify(bPeers));
   const mutual = !!bPeer && !!aPeer && bPeer !== aPeer;
-  console.log('   相互发现:', mutual ? `OK (向 ${bPeer} 发)` : 'FAIL');
-  if (!mutual) throw new Error(`相互发现失败 A→${bPeer} B→${aPeer}`);
+  console.log('   mutual discovery:', mutual ? `OK (sending to ${bPeer})` : 'FAIL');
+  if (!mutual) throw new Error(`mutual discovery failed A->${bPeer} B->${aPeer}`);
 
   const allCards = () => `(() => {
     const L = window.__localim; const out = [];
@@ -141,7 +141,7 @@ async function main() {
     const r = await L.sendFileTo(${JSON.stringify(bPeer)}, file, 'file');
     return r;
   })()`);
-  console.log('[2] A 发起 16MiB:', JSON.stringify(r1));
+  console.log('[2] A started 16MiB transfer:', JSON.stringify(r1));
   const fid1 = r1?.fileId;
 
   // 观察发送进度：轮询 A 是否出现 sending(有 got)。
@@ -151,7 +151,7 @@ async function main() {
     sawSending = arr.some(c => c.fileId === fid1 && c.phase === 'sending');
     if (!sawSending) await wait(25);
   }
-  console.log('[2.a] A 观察到发送中进度:', sawSending ? 'OK' : '(过快/未捕获)');
+  console.log('[2.a] A observed sending progress:', sawSending ? 'OK' : '(too fast/not captured)');
 
   // B 侧等到 done + sha256Ok
   let bDone = null;
@@ -170,15 +170,15 @@ async function main() {
   }
   const shaOk = bDone?.sha256Ok === true && !!bDone?.hasUrl;
   const aSendOk = !!aDone && aDone.phase === 'done';
-  console.log('[3] 发送方完成:', aSendOk ? 'OK' : JSON.stringify(aDone));
-  console.log('   接收方 done/B:', bDone ? JSON.stringify(bDone) : 'NONE',
-              ' sha256通过+url=', shaOk ? 'OK' : 'FAIL');
+  console.log('[3] sender finished:', aSendOk ? 'OK' : JSON.stringify(aDone));
+  console.log('   receiver done/B:', bDone ? JSON.stringify(bDone) : 'NONE',
+              ' sha256 ok+url=', shaOk ? 'OK' : 'FAIL');
   if (!aSendOk || !bDone || !shaOk) {
-    console.error('FAIL 阶段1。A卡片=', await aCdp.ev(allCards()), ' B卡片=', await bCdp.ev(allCards()));
-    console.error('A 会话键=', await aCdp.ev(`(() => [...window.__localim.app.state.conversations.keys()])()`),
-                  ' B 会话键=', await bCdp.ev(`(() => [...window.__localim.app.state.conversations.keys()])()`));
-    console.error('A 数据通道=', await aCdp.ev(`JSON.stringify(window.__localim.mediaDebug())`));
-    throw new Error('FAIL 阶段1');
+    console.error('FAIL phase 1. A cards=', await aCdp.ev(allCards()), ' B cards=', await bCdp.ev(allCards()));
+    console.error('A conversation keys=', await aCdp.ev(`(() => [...window.__localim.app.state.conversations.keys()])()`),
+                  ' B conversation keys=', await bCdp.ev(`(() => [...window.__localim.app.state.conversations.keys()])()`));
+    console.error('A data channels=', await aCdp.ev(`JSON.stringify(window.__localim.mediaDebug())`));
+    throw new Error('FAIL phase 1');
   }
 
   // ---- 阶段2: 取消 128MiB ----
@@ -192,7 +192,7 @@ async function main() {
     return { fileId: r.fileId, hit };
   })()`);
   const fid2 = r2?.fileId;
-  console.log('[4] A 发起 128MiB 并取消(cancelFileByFileId →', r2?.hit, '):', JSON.stringify(r2));
+  console.log('[4] A started 128MiB and canceled (cancelFileByFileId ->', r2?.hit, '):', JSON.stringify(r2));
   // 快速采样 A 侧 fid2 的 phase 序列（定位取消是否曾生效又被覆盖）
   const seen = new Set();
   for (let i = 0; i < 60; i++) {
@@ -202,7 +202,7 @@ async function main() {
     if (hit && hit.phase === 'canceled') break;
     await wait(50);
   }
-  console.log('[4.a] A 侧 phase 采样序列:', [...seen].slice(0, 12).join('  '));
+  console.log('[4.a] A-side phase samples:', [...seen].slice(0, 12).join('  '));
   let aCx = null, bCx = null;
   for (let i = 0; i < 30 && !(aCx && bCx); i++) {
     const aa = await aCdp.ev(allCards()); aCx = aa.find(c => c.fileId === fid2) ?? aCx;
@@ -211,15 +211,15 @@ async function main() {
   }
   // 放宽成 cancelled
   const aCxl = aCx?.phase, bCxl = bCx?.phase;
-  console.log('[5] A 取消态:', aCxl, ' B 取消态:', bCxl);
+  console.log('[5] A cancel state:', aCxl, ' B cancel state:', bCxl);
   if (!(aCxl === 'canceled' && bCxl === 'canceled')) {
-    console.error('A 会话数据通道=', await aCdp.ev(`JSON.stringify(window.__localim.mediaDebug())`));
+    console.error('A conversation data channels=', await aCdp.ev(`JSON.stringify(window.__localim.mediaDebug())`));
     console.error('B frames=', await bCdp.ev(`JSON.stringify((window.__localim?.framesDebug?.()||[]).slice(-60))`));
-    console.error('A 全卡=', await aCdp.ev(allCards()), ' B 全卡=', await bCdp.ev(allCards()));
+    console.error('A all cards=', await aCdp.ev(allCards()), ' B all cards=', await bCdp.ev(allCards()));
   }
   const cancelOk = aCxl === 'canceled' && bCxl === 'canceled';
-  console.log('   双方 canceled:', cancelOk ? 'OK' : 'FAIL');
-  if (!cancelOk) throw new Error('FAIL 阶段2');
+  console.log('   both sides canceled:', cancelOk ? 'OK' : 'FAIL');
+  if (!cancelOk) throw new Error('FAIL phase 2');
 
   // ---- 阶段3: 持久化 —— 重载 B 页面, 打开与 A 的会话应能从历史看到 burst 文件消息 ----
   await open(9266, B_URL, bCdp);
@@ -236,12 +236,12 @@ async function main() {
     return conv.filter(it => it.mediaRef).map(it => ({ name: it.mediaRef.name, size: it.mediaRef.size, hasUrl: !!it.mediaRef.url, fileId: !!it.mediaRef.fileId }));
   })()`);
   const persisted = Array.isArray(hist) && hist.some(h => h.name === 'burst-16m.bin' && h.size === 16*1024*1024 && !h.hasUrl && h.fileId);
-  console.log('[6] B 重载后会话历史(文件条):', JSON.stringify(hist));
-  console.log('   持久化可回看:', persisted ? 'OK' : 'FAIL');
-  if (!persisted) throw new Error('FAIL 阶段3');
+  console.log('[6] B conversation history after reload (file entries):', JSON.stringify(hist));
+  console.log('   persisted and replayable:', persisted ? 'OK' : 'FAIL');
+  if (!persisted) throw new Error('FAIL phase 3');
 
-  const summary = { 进度:sawSending?'OK':'N/A', 发送方done:aSendOk, 接收方sha256:shaOk, 取消:cancelOk, 持久化:persisted };
-  console.log(`\n=== 文件传输增强端到端 OK：进度/SHA256/取消/持久化 ===`);
+  const summary = { progress: sawSending ? 'OK' : 'N/A', senderDone: aSendOk, receiverSha256: shaOk, cancel: cancelOk, persisted };
+  console.log(`\n=== file transfer enhancements e2e OK: progress/SHA256/cancel/persistence ===`);
   console.log(JSON.stringify(summary));
 
   // 成功路径也清理（失败路径由 exit 钩子清理）

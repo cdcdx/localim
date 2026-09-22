@@ -82,12 +82,12 @@ async function main() {
   // 避免把本机遗留的其它 daemon 在线条目误选为目标。
   const bId = await poll(aCdp, `(() => { const L=window.__localim; if(!L) return ''; const keys=[...L.app.state.peers.keys()].filter(k=>k); return keys.length?keys[0]:'' })()`, 20000);
   if (!bId) {
-    console.error('[1] FAIL：A 未发现对端');
+    console.error('[1] FAIL: A did not discover peer');
     console.error('  A=', await aCdp.ev(`(L=window.__localim)?JSON.stringify({connected:L.app.state.connected,peers:[...L.app.state.peers].map(([k,v])=>v.name)}):'NOAPP'`));
     console.error('  B=', await bCdp.ev(`(L=window.__localim)?JSON.stringify({connected:L.app.state.connected,peers:[...L.app.state.peers].map(([k,v])=>v.name)}):'NOAPP'`));
     await cleanup(pa, pb, aProf, bProf); process.exit(1);
   }
-  console.log('[1] A 发现 B: OK deviceId=' + bId);
+  console.log('[1] A discovered B: OK deviceId=' + bId);
 
   // A 发起语音通话
   const start = await aCdp.ev(`(async () => {
@@ -97,12 +97,12 @@ async function main() {
       return { ok:true, callId:s.callId, sdpState:s.pc.signalingState };
     } catch(e){ return { ok:false, err:String(e) }; }
   })()`);
-  console.log('[2] A 发起语音:', JSON.stringify(start));
+  console.log('[2] A started voice call:', JSON.stringify(start));
   if (!start || !start.ok) { await cleanup(pa, pb, aProf, bProf); process.exit(1); }
 
   // B 侧应进入 ringing
   const ring = await poll(bCdp, `(() => { const L=window.__localim; if(!L) return ''; const m=L.app.state.media; return (m&&m.direction==='incoming'&&m.state==='ringing')?JSON.stringify({callId:m.callId,mode:m.peer.mode}):'' })()`, 12000);
-  console.log('[3] B 来电 ringing:', ring ? 'OK ' + ring : 'NONE(但可能 offer 先到，继续)');
+  console.log('[3] B ringing:', ring ? 'OK ' + ring : 'NONE (offer may arrive first, continuing)');
 
   // B 接听
   const acc = await bCdp.ev(`(async () => {
@@ -110,7 +110,7 @@ async function main() {
     try { await L.acceptIncomingCall(${JSON.stringify(start.callId)}, 'voice', ${JSON.stringify(bId)}); return { ok:true }; }
     catch(e){ return { ok:false, err:String(e) }; }
   })()`);
-  console.log('[4] B 接听 acceptIncomingCall:', JSON.stringify(acc));
+  console.log('[4] B acceptIncomingCall:', JSON.stringify(acc));
   if (!acc || !acc.ok) { await cleanup(pa, pb, aProf, bProf); process.exit(1); }
 
   // 轮询：两端 PeerConnection 建立 + 双向 audio 轨道
@@ -129,7 +129,7 @@ async function main() {
       await wait(800);
     }
     const last = await cdp.ev(snap);
-    console.log(`[5] ${label} 媒体态(超时):`, last ? JSON.stringify(last) : 'NONE');
+    console.log(`[5] ${label} media state (timeout):`, last ? JSON.stringify(last) : 'NONE');
     // 超时后抓取 ICE 候选对 / DTLS 状态定位卡点
     const dump = await cdp.ev(`(async () => {
       const L=window.__localim; if(!L) return 'NOAPP';
@@ -152,18 +152,18 @@ async function main() {
     return null;
   };
   const aLive = await waitLive(aCdp, 'A');
-  console.log('[5] A 媒体态:', aLive ? JSON.stringify(aLive) : 'NONE');
+  console.log('[5] A media state:', aLive ? JSON.stringify(aLive) : 'NONE');
   const bLive = await waitLive(bCdp, 'B');
-  console.log('[5] B 媒体态:', bLive ? JSON.stringify(bLive) : 'NONE');
+  console.log('[5] B media state:', bLive ? JSON.stringify(bLive) : 'NONE');
 
   // 双向可听性：A 通过 data-channel 无关，直接以对端 ontrack 建流数 + connectionState 断言
   const aOk = aLive?.live === true;
   const bOk = bLive?.live === true;
-  console.log('=== 语音通话端到端 ' + ((aOk && bOk) ? 'OK：A/B 双向 audio 轨道均建立，PeerConnection connected' : 'FAIL') + ' ===');
+  console.log('=== voice call e2e ' + ((aOk && bOk) ? 'OK: bidirectional audio tracks up for A/B, PeerConnection connected' : 'FAIL') + ' ===');
 
   // 挂断清理
   const hang = await aCdp.ev(`(L=window.__localim)?(L.hangupDebug(),'ok'):'noapp'`);
-  console.log('[6] A hangupDebug:', hang, '| A 残留会话=', await aCdp.ev(`(L=window.__localim)?L.mediaDebug().length:'noapp'`));
+  console.log('[6] A hangupDebug:', hang, '| A remaining sessions=', await aCdp.ev(`(L=window.__localim)?L.mediaDebug().length:'noapp'`));
   await wait(500);
 
   await cleanup(pa, pb, aProf, bProf);

@@ -190,7 +190,7 @@ const wsSrv = createServer((sock) => {
     }
   });
 });
-wsSrv.listen(PORT_WS, "127.0.0.1", () => console.log(`[localim/dev] ws 7615 就绪: ws://127.0.0.1:${PORT_WS}`));
+wsSrv.listen(PORT_WS, "127.0.0.1", () => console.log(`[localim/dev] ws ready on ws://127.0.0.1:${PORT_WS}`));
 
 // ---- WebUI 静态服务 ----
 const uiSrv = http.createServer(async (req, res) => {
@@ -206,4 +206,4 @@ const uiSrv = http.createServer(async (req, res) => {
     res.writeHead(404); res.end("not found");
   }
 });
-uiSrv.listen(PORT_WEBUI, "127.0.0.1", () => console.log(`[localim/dev] webui 就绪: http://127.0.0.1:${PORT_WEBUI}`));
+uiSrv.listen(PORT_WEBUI, "127.0.0.1", () => console.log(`[localim/dev] webui ready: http://127.0.0.1:${PORT_WEBUI}`));

@@ -5,6 +5,7 @@
 #ifndef LOCALIM_CORE_DISCOVERY_RELAY_SERVER_H_
 #define LOCALIM_CORE_DISCOVERY_RELAY_SERVER_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>

@@ -3,6 +3,7 @@
 #ifndef LOCALIM_CORE_WS_HUB_H_
 #define LOCALIM_CORE_WS_HUB_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>

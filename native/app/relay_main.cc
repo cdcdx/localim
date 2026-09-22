@@ -41,7 +41,8 @@ int main(int argc, char* argv[]) {
   logging::SetMinLogLevel(logging::LOGGING_INFO);
   LOG(INFO) << "localim_relay starting";
 
-  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
+  // 与 daemon 一致：net 依赖 CurrentIOThread，主线程必须是 IO 型 pump。
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::IO);
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("localim_relay");
 
   const base::CommandLine& cmd = *base::CommandLine::ForCurrentProcess();

@@ -99,13 +99,13 @@ async function runScenario(name, base, pskA, pskB) {
 
   const mutual = (cd) => `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>=1; })()`;
   for (const [n, cd] of [['A', a], ['B', b]]) {
-    if (!(await waitFor(cd, mutual(cd)))) { await cleanup(); throw new Error(`${name}: ${n} 互发现失败`); }
+    if (!(await waitFor(cd, mutual(cd)))) { await cleanup(); throw new Error(`${name}: ${n} failed mutual discovery`); }
   }
   const [aId, bId] = [await hello(a), await hello(b)];
-  if (!aId?.id || !bId?.id) { await cleanup(); throw new Error(`${name}: hello 未取到 deviceId`); }
+  if (!aId?.id || !bId?.id) { await cleanup(); throw new Error(`${name}: hello missing deviceId`); }
 
   const nonce = `${name}-${Date.now()}`;
-  const body = `enc 消息 ${name} ${Date.now()}`;
+  const body = `enc msg ${name} ${Date.now()}`;
   await a.ev(`(() => { const L=window.__localim; return L.native.send('message','send',{kind:'chat',type:'text',to:${JSON.stringify(bId.id)},nonce:${JSON.stringify(nonce)},ts:Date.now(),body:${JSON.stringify(body)}}); })()`);
   await wait(1400);
 
@@ -140,29 +140,29 @@ async function main() {
   try {
     // 场景1: 同 PSK → B 解出原文，A 回执 delivered
     const m = await runScenario('match', 9400, 'lan-secret', 'lan-secret');
-    console.log('[1 同PSK] B.body=%j B.status=%j A.status=%j B_reject=%s A_ack=%s',
+    console.log('[1 same PSK] B.body=%j B.status=%j A.status=%j B_reject=%s A_ack=%s',
       m.bIndex?.body, m.bIndex?.status, m.aStatus, m.bRejected, m.aAcked);
-    const matchOk = m.bIndex && m.bIndex.body.startsWith('enc 消息 match') && m.aStatus === 'delivered' && !m.bRejected;
-    if (!matchOk) throw new Error('同 PSK 场景未通过：B 未收到原文/A 未收到回执');
+    const matchOk = m.bIndex && m.bIndex.body.startsWith('enc msg match') && m.aStatus === 'delivered' && !m.bRejected;
+    if (!matchOk) throw new Error('same-PSK scenario failed: B did not get plaintext / A got no ack');
 
     // 场景2: 密钥不匹配 → B 验签拒收，A 无回执
     const x = await runScenario('mismatch', 9500, 'psk-A', 'psk-B');
-    console.log('[2 密钥不匹配] B.body=%s B_reject=%s A.status=%s A_ack=%s',
+    console.log('[2 key mismatch] B.body=%s B_reject=%s A.status=%s A_ack=%s',
       x.bIndex?.body, x.bRejected, x.aStatus, x.aAcked);
     // 关键对比：同 PSK(场景1)B 收到原文、A 送达；密钥不匹配则 B 收不到、A 无回执 → 证明验签确实拒收。
     const mismatchOk = x.bIndex === null && x.aStatus !== 'delivered';
-    if (!mismatchOk) throw new Error('密钥不匹配场景未通过：B 未拒收/A 状态不符');
+    if (!mismatchOk) throw new Error('key-mismatch scenario failed: B did not reject / A status unexpected');
 
     // 场景3: 无 PSK → 明文直通（旧版行为）
     const p = await runScenario('plain', 9600, null, null);
-    console.log('[3 无PSK] B.body=%j A.status=%j', p.bIndex?.body, p.aStatus);
-    const plainOk = p.bIndex && p.bIndex.body.startsWith('enc 消息 plain') && p.aStatus === 'delivered';
-    if (!plainOk) throw new Error('无 PSK 明文场景未通过：B 未收到明文/A 未回执');
+    console.log('[3 no PSK] B.body=%j A.status=%j', p.bIndex?.body, p.aStatus);
+    const plainOk = p.bIndex && p.bIndex.body.startsWith('enc msg plain') && p.aStatus === 'delivered';
+    if (!plainOk) throw new Error('no-PSK plaintext scenario failed: B did not get plaintext / A got no ack');
 
     // 场景4: 加密缺省明文兜底 —— 同 PSK 场景 B 收到的 body 应被解密为原文（非 base64），
     //        A 侧 daemon 日志不应出现 reject peer frame，且 B 侧出现（解密走 enc 分支）。
     pass = matchOk && mismatchOk && plainOk;
-    console.log('=== 消息加密 e2e: ' + (pass ? 'PASS' : 'FAIL') + ' ===');
+    console.log('=== message encryption e2e: ' + (pass ? 'PASS' : 'FAIL') + ' ===');
     process.exit(pass ? 0 : 3);
   } catch (e) {
     console.error('FAIL', e && e.message ? e.message : e);

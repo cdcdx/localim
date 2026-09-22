@@ -47,12 +47,19 @@ powershell -ExecutionPolicy Bypass -File localim\scripts\build_localim_win.ps1
 # <chromium>/localim/scripts/build_localim_unix.sh
 # 默认按当前主机选 target_os；跨编用 TARGET_OS=mac|linux 覆盖
 TARGET_OS=linux bash localim/scripts/build_localim_unix.sh
-# 产物：<chromium>/src/out/localim/localim_daemon
+# 静态链接（is_component_build=false，产物自带依赖、便于拷走）：
+bash localim/scripts/build_localim_unix.sh build static
+# 产物：<chromium>/src/out/localim/localim_daemon（+ localim_relay）
 ```
 
 > 说明：`scripts/` 会在首次把 `src/localim -> ../localim` 以符号链接/连接点挂载进源码根，
 > 因为 GN 要求构建目录与源码同根。手动方式：
 > `gn gen ../out/localim --args="is_component_build=true use_siso=false symbol_level=0"`。
+>
+> 注意：macOS 上 `enable_stripping=true` 与 `is_component_build=true` 不可同时开启——上游
+> `//chrome/BUILD.gn` 在 `enable_stripping` 分支给 `ldflags` 赋 `exported_symbols_list`，
+> `is_component_build` 分支再赋 `rpath`，gn 会报 `Replacing nonempty list`。
+> 脚本因此只在 `build static` 时开启剥离。
 
 ---
 

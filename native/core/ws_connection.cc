@@ -152,7 +152,7 @@ void WsConnection::OnHandshakeRead(int result) {
   // 101 之后的服务端立即帧字节(skeleton 下一般没有)预置进帧队列继续解析。
   if (client_handshake_buf_.rfind(" 101 ", 0) == std::string::npos &&
       client_handshake_buf_.rfind("HTTP/1.1 101", 0) == std::string::npos) {
-    LOG(ERROR) << "parse_handshake: 非 101 应答, 忽略";
+    LOG(ERROR) << "parse_handshake: non-101 response, ignored";
     Close();
     return;
   }

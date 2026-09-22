@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
@@ -112,7 +114,11 @@ void Daemon::Start() {
     return;
   started_ = true;
   io_thread_ = std::make_unique<base::Thread>("localim-io");
-  if (!io_thread_->Start()) {
+  // 所有 net 对象都跑在这个线程上，而 net 内部会取 base::CurrentIOThread::Get()，
+  // 其 DCHECK 要求 pump 为 IO 型；base::Thread 默认 DEFAULT 会直接 FATAL。
+  base::Thread::Options options;
+  options.message_pump_type = base::MessagePumpType::IO;
+  if (!io_thread_->StartWithOptions(std::move(options))) {
     LOG(ERROR) << "Failed to start io thread";
     started_ = false;
     return;
@@ -263,19 +269,19 @@ bool Daemon::VerifyPeerFrame(const std::string& json) {
   const std::string nonce = GetStr(d, "nonce", "");
   const std::string sig = GetStr(d, "sig", "");
   if (from.empty() || ts.empty() || nonce.empty() || sig.empty()) {
-    LOG(WARNING) << "reject peer frame: 缺认证字段 from=" << from;
+    LOG(WARNING) << "reject peer frame: missing auth field from=" << from;
     return false;
   }
   int64_t ts_ms = 0;
   if (!base::StringToInt64(ts, &ts_ms)) {
-    LOG(WARNING) << "reject peer frame: 非法时间戳";
+    LOG(WARNING) << "reject peer frame: invalid timestamp";
     return false;
   }
   const int64_t now_ms =
       base::Time::Now().InMillisecondsSinceUnixEpoch();
   if (now_ms < ts_ms - kFrameWindow.InMilliseconds() ||
       now_ms > ts_ms + kFrameWindow.InMilliseconds()) {
-    LOG(WARNING) << "reject peer frame: 超出时间窗 from=" << from;
+    LOG(WARNING) << "reject peer frame: outside time window from=" << from;
     return false;
   }
   // 防重放：同一 (from,nonce) 只接受一次。上限保护，防长跑进程无界增长。
@@ -283,7 +289,7 @@ bool Daemon::VerifyPeerFrame(const std::string& json) {
     seen_sig_.clear();
   const std::string key = from + "|" + nonce;
   if (!seen_sig_.insert(key).second) {
-    LOG(WARNING) << "reject peer frame: 重放 from=" << from << " nonce=" << nonce;
+    LOG(WARNING) << "reject peer frame: replay from=" << from << " nonce=" << nonce;
     return false;
   }
   // 重算签名：对去掉 ts/nonce/sig 的规范化信封计算，与出向 Sign 同构。
@@ -292,7 +298,7 @@ bool Daemon::VerifyPeerFrame(const std::string& json) {
   body.Remove("nonce");
   body.Remove("sig");
   if (!cipher_->Verify(DumpDict(body), ts, nonce, sig)) {
-    LOG(WARNING) << "reject peer frame: 签名/密钥不匹配 from=" << from;
+    LOG(WARNING) << "reject peer frame: signature/key mismatch from=" << from;
     return false;
   }
   return true;
@@ -411,7 +417,7 @@ void Daemon::SendPeerEnvelope(const std::string& device_id,
   }
   PeerRecord* rec = peers_.Find(device_id);
   if (!rec || rec->host.empty()) {
-    LOG(WARNING) << "SendPeer: 无对端地址 " << device_id;
+    LOG(WARNING) << "SendPeer: no peer address for " << device_id;
     return;
   }
   const uint16_t port = rec->port ? rec->port : ports_.peer;
@@ -1015,7 +1021,7 @@ void Daemon::Dispatch(int client_id, const std::string& ns,
       if (peers_.Has(to))
         SendPeerSignal(to, "media", method, std::move(pkt));
       else
-        LOG(WARNING) << "media." << method << ": 未知对端 " << to;
+        LOG(WARNING) << "media." << method << ": unknown peer " << to;
     }
     SendResult(client_id, txn, ns, method,
                base::DictValue().Set("propagated", true));

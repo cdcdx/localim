@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const daemon = join(root, "dev", "daemon", "daemon.mjs");
 
-console.log("[localim] 启动 dev daemon (协议子集 7615 + webui 8080)...");
+console.log("[localim] starting dev daemon (protocol subset 7615 + webui 8080)...");
 const child = spawn(process.execPath, [daemon], {
   stdio: "inherit",
   cwd: root,

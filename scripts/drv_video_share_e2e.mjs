@@ -130,8 +130,8 @@ async function main() {
     const bReady = await waitFor(bCdp, `(() => { const L=window.__localim; if(!L) return false; const k=[...L.app.state.peers.keys()].filter(Boolean); return k.length>0; })()`, 40, 400);
     const aId = await bCdp.ev(`(() => { const L=window.__localim; return L?([...L.app.state.peers.keys()].filter(Boolean)[0]||''):''; })()`);
     const hasGlobalOk = (await aCdp.ev(hasGlobal())) && (await bCdp.ev(hasGlobal()));
-    console.log('[0] 互发现: A-ready=%s(→B %s) B-ready=%s(→A %s) global=%s', aReady, bId, bReady, aId, hasGlobalOk);
-    if (!aReady || !bReady || !bId || bId === aId) throw new Error('互发现失败');
+    console.log('[0] mutual discovery: A-ready=%s (->B %s) B-ready=%s (->A %s) global=%s', aReady, bId, bReady, aId, hasGlobalOk);
+    if (!aReady || !bReady || !bId || bId === aId) throw new Error('mutual discovery failed');
 
     // 预热：A→B 传一个小文件，迫使 A↔B 建立持久 peer 通道（冷启动时 SendPeer dial 常一次连不上，
     // 早期 offer/answer/ice 中继会丢；文件通道连同信令一起打通后，视频通话就可靠了）。
@@ -151,7 +151,7 @@ async function main() {
       return { fileId: wf, done: got };
     };
     const warm = await warmUp();
-    console.log('[0.5] 预热文件传输(建立 peer 通道):', warm.done ? 'OK' : 'FAIL（将依赖重试）', 'fileId=', warm.fileId);
+    console.log('[0.5] warmup file transfer (establish peer channel):', warm.done ? 'OK' : 'FAIL (will rely on retries)', 'fileId=', warm.fileId);
 
     // ---- 阶段1: 视频通话 ----
     const start = await aCdp.ev(`(async () => {
@@ -159,23 +159,23 @@ async function main() {
       try { const s = await L.startCall(${JSON.stringify(bId)}, 'video'); return { ok:true, callId:s.callId }; }
       catch(e){ return { ok:false, err:String(e) }; }
     })()`);
-    console.log('[1] A 发起视频:', JSON.stringify(start));
-    if (!start?.ok) throw new Error('视频发起失败 ' + JSON.stringify(start));
+    console.log('[1] A started video call:', JSON.stringify(start));
+    if (!start?.ok) throw new Error('failed to start video call ' + JSON.stringify(start));
     const callId = start.callId;
 
     let ring = await waitFor(bCdp, `(() => { const L=window.__localim; const m=L&&L.app.state.media; return !!(m && m.direction==='incoming' && m.state==='ringing'); })()`, 30, 400);
-    console.log('[2] B 来电 ringing:', ring ? 'OK' : '(offer 可能先到，继续)');
+    console.log('[2] B ringing:', ring ? 'OK' : '(offer may arrive first, continuing)');
     // 等 offer 抵达 B（B 侧已由 offer 建会话）再接听，贴近真实接听时机、规避抢先应答竞态。
     await waitFor(bCdp, `(() => { const L=window.__localim; return !!(L && L.mediaDebug().some(x=>x.callId===${JSON.stringify(callId)})); })()`, 40, 300);
-    console.log('   B 已收到 offer(有会话): OK');
+    console.log('   B got the offer (session exists): OK');
 
     const acc = await bCdp.ev(`(async () => {
       const L = window.__localim;
       try { await L.acceptIncomingCall(${JSON.stringify(callId)}, 'video', ${JSON.stringify(aId)}); return {ok:true}; }
       catch(e){ return {ok:false, err:String(e)}; }
     })()`);
-    console.log('[3] B 接听:', JSON.stringify(acc));
-    if (!acc?.ok) throw new Error('接听失败 ' + JSON.stringify(acc));
+    console.log('[3] B answered:', JSON.stringify(acc));
+    if (!acc?.ok) throw new Error('failed to answer ' + JSON.stringify(acc));
 
     // 等待真实 connectionState==='connected'；超时则抓 getStats 定位卡点。
     const statsDump = `(async () => {
@@ -202,24 +202,24 @@ async function main() {
         if (snap) { const o = JSON.parse(snap); if (o.sessions.some(x => x.pc === 'connected' && (x.local.length || x.remote.length))) return o; }
         await wait(500);
       }
-      console.error(`[!] ${label} 30s 未 connected stats=`, await cdp.ev(statsDump));
+      console.error(`[!] ${label} not connected within 30s stats=`, await cdp.ev(statsDump));
       return null;
     };
     let sA = await waitConnected(aCdp, 'A');
     let sB = await waitConnected(bCdp, 'B');
     if (!sA) sA = JSON.parse(await aCdp.ev(mediaSnapExpr()) || 'null');
     if (!sB) sB = JSON.parse(await bCdp.ev(mediaSnapExpr()) || 'null');
-    console.log('[4] A 媒体态:', JSON.stringify(sA));
-    console.log('   B 媒体态:', JSON.stringify(sB));
+    console.log('[4] A media state:', JSON.stringify(sA));
+    console.log('   B media state:', JSON.stringify(sB));
 
     const aLive = sA?.sessions.some(x => x.pc==='connected' && x.ice==='connected' && x.local.includes('video') && x.remote.includes('video'));
     const bLive = sB?.sessions.some(x => x.pc==='connected' && x.ice==='connected' && x.local.includes('video') && x.remote.includes('video'));
     const aDomMain = sA?.dom.mainTracks.includes('video') === true && sA.dom.mainW > 0;
     const bDomMain = sB?.dom.mainTracks.includes('video') === true && sB.dom.mainW > 0;
-    console.log('[4] A 双向video+DOM=%s B 双向video+DOM=%s', aLive && aDomMain, bLive && bDomMain);
+    console.log('[4] A bidirectional video+DOM=%s B bidirectional video+DOM=%s', aLive && aDomMain, bLive && bDomMain);
     const vOk = aLive && bLive && aDomMain && bDomMain;
-    console.log('=== 阶段1 视频通话:', vOk ? 'OK（两端双向 video 轨道 + 浮层绑定主画面渲染）' : 'FAIL', '===');
-    if (!vOk) throw new Error('阶段1 视频未连通');
+    console.log('=== phase 1 video call:', vOk ? 'OK (bidirectional video tracks + overlay bound to main view)' : 'FAIL', '===');
+    if (!vOk) throw new Error('phase 1 video not connected');
 
     await aCdp.ev(`window.__localim.hangupDebug(); void 0;`);
     await wait(400);
@@ -231,19 +231,19 @@ async function main() {
       catch(e){ return { ok:false, err:String(e) }; }
     })()`);
     if (!shr?.ok) {
-      console.log('[5] 阶段2 共享: 本环境 getDisplayMedia 不可用 → SKIP（' + shr?.err + '）');
+      console.log('[5] phase 2 sharing: getDisplayMedia unavailable in this environment -> SKIP (' + shr?.err + ')');
     } else {
       const sid = shr.callId;
       // 与视频阶段同理：等 offer 抵达 B（会话已建、pendingOffer 已暂存）再接听，
       // 否则 acceptIncomingCall 读不到 offer 而产生不了 answer，A 会一直卡在 checking。
       await waitFor(bCdp, `(() => { const L=window.__localim; return !!(L && L.mediaDebug().some(x=>x.callId===${JSON.stringify(sid)})); })()`, 40, 300);
-      console.log('   B 已收到共享 offer(有会话): OK');
+      console.log('   B got the share offer (session exists): OK');
       const acc2 = await bCdp.ev(`(async () => {
         const L = window.__localim;
         try { await L.acceptIncomingCall(${JSON.stringify(sid)}, 'share', ${JSON.stringify(aId)}); return {ok:true}; }
         catch(e){ return {ok:false, err:String(e)}; }
       })()`);
-      console.log('[5] B 应答共享:', JSON.stringify(acc2));
+      console.log('[5] B answered share:', JSON.stringify(acc2));
       let s2A = await waitConnected(aCdp, 'A-share');
       let s2B = await waitConnected(bCdp, 'B-share');
       if (!s2A) s2A = JSON.parse(await aCdp.ev(mediaSnapExpr()) || 'null');
@@ -252,10 +252,10 @@ async function main() {
       const bViewer = s2B?.sessions.some(x => x.remote.includes('video')) === true
         && s2B?.dom.mainTracks.includes('video') === true && s2B.dom.mainW > 0;
       const aShare = s2A?.sessions.some(x => x.local.includes('video')) === true && s2A.dom.mainW > 0;
-      console.log('[6] 共享 A(主播本地视频)=%s  B(观众远端渲染)=%s', aShare, bViewer);
+      console.log('[6] sharing A (host local video)=%s  B (viewer remote render)=%s', aShare, bViewer);
       console.log('   A=', JSON.stringify(s2A), ' B=', JSON.stringify(s2B));
       const shOk = aShare && bViewer;
-      console.log('=== 阶段2 共享桌面:', shOk ? 'OK（A 采集屏幕、B 观众远端画面绑定渲染）' : 'FAIL', '===');
+      console.log('=== phase 2 screen sharing:', shOk ? 'OK (A captures screen, B viewer renders remote frame)' : 'FAIL', '===');
       await aCdp.ev(`window.__localim.hangupDebug(); void 0;`);
     }
 

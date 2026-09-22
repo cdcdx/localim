@@ -39,7 +39,7 @@ function fail(msg) { console.error('FAIL:', msg); process.exit(2); }
 async function main() {
   const c = await open();
   const hello = await c.request('identity', 'hello', {});
-  if (!hello.ok) fail('hello 失败');
+  if (!hello.ok) fail('hello failed');
   if (phase === 'send') {
     const bodies = [];
     for (let i = 0; i < N; i++) {
@@ -48,28 +48,28 @@ async function main() {
       const r = await c.request('message', 'send', {
         kind: 'chat', type: 'text', to: X, nonce: `${prefix}-${X}-${i}`, ts: Date.now(), body,
       });
-      if (!r.ok || r.d?.accepted !== true) fail(`第${i}条发送未被接受: ${JSON.stringify(r.d)}`);
+      if (!r.ok || r.d?.accepted !== true) fail(`message #${i} not accepted: ${JSON.stringify(r.d)}`);
       await delay(60);
     }
     const h = await c.request('message', 'history', { to: X, kind: 'chat', limit });
-    if (!h.ok) fail('history 请求失败');
+    if (!h.ok) fail('history request failed');
     const items = (h.d?.items || []);
     const got = items.filter((it) => it.body && bodies.includes(it.body)).map((it) => it.body);
     const miss = bodies.filter((b) => !got.includes(b));
-    console.log(`[history] send ${N} 条 → history 返回 ${items.length} 条，其中本次 ${got.length} 条`
-      + (miss.length ? `，缺失: ${miss.join(', ')}` : ''));
-    if (miss.length) fail('落库缺失');
+    console.log(`[history] sent ${N} -> history returned ${items.length}, ${got.length} of them from this run`
+      + (miss.length ? `, missing: ${miss.join(', ')}` : ''));
+    if (miss.length) fail('missing persisted items');
     const ordered = bodies.every((b, i) => got[i] === b);
-    console.log(`[history] 顺序 ${ordered ? 'OK(旧->新)' : '错乱'}`);
-    if (!ordered) fail('历史顺序错误');
-    console.log(`[history] PHASE=send PASS：${N} 条已落库并可按序回看`);
+    console.log(`[history] order ${ordered ? 'OK (old->new)' : 'OUT OF ORDER'}`);
+    if (!ordered) fail('history order mismatch');
+    console.log(`[history] PHASE=send PASS: ${N} items persisted and replayed in order`);
   } else {
     const h = await c.request('message', 'history', { to: X, kind: 'chat', limit });
     const items = (h.d?.items || []);
-    console.log(`[history] PHASE=check：${X} 历史 ${items.length} 条（期望 ${EXPECT}）`);
-    if (items.length !== EXPECT) fail(`历史条数不符: 期望 ${EXPECT}, 实得 ${items.length}`);
-    if (EXPECT > 0) console.log(`[history] 最近一条: ${JSON.stringify(items[items.length - 1].body)}`);
-    console.log(`[history] PHASE=check PASS：重启后历史仍在（${EXPECT} 条）`);
+    console.log(`[history] PHASE=check: ${X} history ${items.length} items (expected ${EXPECT})`);
+    if (items.length !== EXPECT) fail(`history count mismatch: expected ${EXPECT}, got ${items.length}`);
+    if (EXPECT > 0) console.log(`[history] latest item: ${JSON.stringify(items[items.length - 1].body)}`);
+    console.log(`[history] PHASE=check PASS: history survived restart (${EXPECT} items)`);
   }
   c.ws.close();
   process.exit(0);

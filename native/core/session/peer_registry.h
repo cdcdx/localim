@@ -2,6 +2,7 @@
 #ifndef LOCALIM_CORE_SESSION_PEER_REGISTRY_H_
 #define LOCALIM_CORE_SESSION_PEER_REGISTRY_H_
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>

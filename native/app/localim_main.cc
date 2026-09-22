@@ -82,7 +82,9 @@ int main(int argc, char* argv[]) {
   logging::SetMinLogLevel(logging::LOGGING_INFO);
   LOG(INFO) << "localim_daemon starting";
 
-  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
+  // net（TCPServerSocket / UDPSocket / NetworkChangeNotifier）走 base::CurrentIOThread，
+  // 其 DCHECK 要求主线程 pump 为 IO 型；用 UI 型会在首处 IO 调用时 FATAL。
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::IO);
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("localim_daemon");
 
   const base::CommandLine& cmd = *base::CommandLine::ForCurrentProcess();

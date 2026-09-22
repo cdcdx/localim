@@ -111,14 +111,14 @@ async function main() {
     const online1 = (cd) => `(() => { const L=window.__localim; return L?[...L.app.state.peers.keys()].filter(Boolean).length:0; })()`;
     for (const [n, cd] of [['A', a], ['B', b]]) {
       if (!(await waitFor(cd, `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>=1; })()`, 60, 400)))
-        throw new Error(`${n} 互发现失败`);
+        throw new Error(`${n} mutual discovery failed`);
     }
-    console.log('[1] 互发现 A=%s B=%s', await a.ev(online1()), await b.ev(online1()));
+    console.log('[1] mutual discovery A=%s B=%s', await a.ev(online1()), await b.ev(online1()));
 
     const [aIdObj, bIdObj] = [await hello(a), await hello(b)];
     const aId = aIdObj?.id, bId = bIdObj?.id;
-    if (!aId || !bId) throw new Error('identity.hello 未取到 deviceId');
-    console.log('[1.5] daemon 身份 A=%s B=%s', aId.slice(0, 8), bId.slice(0, 8));
+    if (!aId || !bId) throw new Error('identity.hello missing deviceId');
+    console.log('[1.5] daemon identity A=%s B=%s', aId.slice(0, 8), bId.slice(0, 8));
 
     // 阶段2: 杀掉 B(保留数据目录)。互发现不建 peer 连接，A 对 B 无既有连通道 → Connected 必为 false，离线入队确定。
     const bDaemon = handles[1];
@@ -127,7 +127,7 @@ async function main() {
 
     // A 发文本到 bId（离线）
     const nonce = `off-${Date.now()}`;
-    const body = '离线消息 你好 B ' + Date.now();
+    const body = 'offline hello B ' + Date.now();
     await a.ev(`(() => { const L=window.__localim; return L.native.send('message','send',{kind:'chat',type:'text',to:${JSON.stringify(bId)},nonce:${JSON.stringify(nonce)},ts:Date.now(),body:${JSON.stringify(body)}}); })()`);
     await wait(900);
 
@@ -135,15 +135,15 @@ async function main() {
     let aLogTxt = '';
     try { aLogTxt = readFileSync(aLog, 'utf8'); } catch {}
     const queued = /offline queued to/.test(aLogTxt);
-    console.log('[2] 离线入队 log(offline queued)=%s', queued);
-    if (!queued) throw new Error('A 未将离线消息入队（可能走了直发丢包路径）');
+    console.log('[2] offline enqueue log(offline queued)=%s', queued);
+    if (!queued) throw new Error('A did not enqueue the offline message (may have taken the direct-send path)');
 
     // A 本端消息态：B 离线未送达（应为 sent/undefined，而非 delivered）。
     // 注意：daemon 回显 chat.from=daemon deviceId（非 WebUI 的 self id），故发送消息落在 aId 键下——必须全会话扫描。
     const scanByNonce = (nonceJs) => `(() => { const L=window.__localim; if(!L) return null; for(const arr of L.app.state.conversations.values()){ const it=arr.find(c=>c.nonce===${nonceJs}); if(it) return it.status; } return null; })()`;
     const aStatus = await a.ev(scanByNonce(JSON.stringify(nonce)));
-    console.log('[2.5] A 侧消息 status=', aStatus);
-    if (aStatus === 'delivered') throw new Error('不该在 B 离线时已送达');
+    console.log('[2.5] A-side message status=', aStatus);
+    if (aStatus === 'delivered') throw new Error('should not be delivered while B is offline');
 
     // 阶段3: 重启 B（同 db 目录 → deviceId 稳定）+ 新 edge
     track(launchDaemon(N.B, db, join(db, 'b2.log')));
@@ -155,16 +155,16 @@ async function main() {
     await b2.ev(`window.__localim.login('Bob'); void 0;`);
     await wait(400);
     const b2Obj = await hello(b2);
-    console.log('[3] B 重启后 deviceId=%s（应等于 %s）', (b2Obj?.id || '').slice(0, 8), bId.slice(0, 8));
-    if (b2Obj?.id !== bId) throw new Error('B 重启后 deviceId 漂移，离线队列无法按键补投');
+    console.log('[3] deviceId after B restart=%s (expected %s)', (b2Obj?.id || '').slice(0, 8), bId.slice(0, 8));
+    if (b2Obj?.id !== bId) throw new Error('B deviceId drifted after restart, offline queue cannot be keyed for redelivery');
 
     // 补投+回执：待 A 侧消息态翻转为 delivered（B 收到并回 ack）——全会话扫描
     const delivered = await waitFor(a, `(() => { const L=window.__localim; if(!L) return false; for(const arr of L.app.state.conversations.values()){ const it=arr.find(c=>c.nonce===${JSON.stringify(nonce)}); if(it && it.status==='delivered') return true; } return false; })()`, 90, 500);
-    console.log('[4] A 侧最终 status=delivered?', delivered);
+    console.log('[4] A-side final status=delivered?', delivered);
     if (!delivered) {
       console.error('[dbg] A.evlog(message.ack)=', await a.ev(`JSON.stringify(window.__localim.native.evlog.filter(e=>e.ns==='message').map(e=>({m:e.m,d:e.d})).slice(-8))`));
       console.error('[dbg] B2.evlog(message)=', await b2.ev(`JSON.stringify(window.__localim.native.evlog.filter(e=>e.ns==='message').map(e=>({m:e.m,d:e.d})).slice(-8))`));
-      throw new Error('B 上线后 A 未收到送达回执');
+      throw new Error('B came online but A got no delivery ack');
     }
 
     // B 侧已收到该消息（持久化进 B daemon 的 store）。B2 页面可能在补投瞬间尚未连上 daemon，
@@ -173,16 +173,16 @@ async function main() {
       L.native.loadHistory(${JSON.stringify(aId)},'chat'); await new Promise(r=>setTimeout(r,200));
       const arr=L.app.state.conversations.get(${JSON.stringify(aId)})||[];
       return arr.some(c=>c.body===${JSON.stringify(body)}); })()`, 40, 400);
-    console.log('[5] B 收到补投消息(store/history)=', bGot);
-    if (!bGot) throw new Error('B 上线后未收到离线补投消息');
+    console.log('[5] B got redelivered message (store/history)=', bGot);
+    if (!bGot) throw new Error('B did not receive the redelivered offline message');
 
     // A daemon 补投日志佐证
     try { aLogTxt = readFileSync(aLog, 'utf8'); } catch {}
     const flushed = /offline flushed/.test(aLogTxt);
-    console.log('[6] A daemon 补投 log(offline flushed)=%s', flushed);
+    console.log('[6] A daemon redelivery log(offline flushed)=%s', flushed);
 
     pass = queued && (aStatus !== 'delivered') && delivered && bGot && flushed;
-    console.log('=== 离线消息投递: ' + (pass ? 'PASS（B 离线入队 → 上线 A 补投 → B 收到 → A 送达回执）' : 'FAIL') + ' ===');
+    console.log('=== offline message delivery: ' + (pass ? 'PASS (enqueued while B offline -> A redelivers once online -> B receives -> A gets ack)' : 'FAIL') + ' ===');
 
     await cleanup();
     process.exit(pass ? 0 : 3);
@@ -191,7 +191,7 @@ async function main() {
     for (const [lg, tag] of [[join(da, 'a.log'), 'A'], [join(db, 'b.log'), 'B'], [join(db, 'b2.log'), 'B2']]) {
       try {
         const t = readFileSync(lg, 'utf8');
-        const rel = t.split('\n').filter((l) => /offline|SendPeer|dial|inbound peer|未知对端|queued|flushed|ack/.test(l)).slice(-25);
+        const rel = t.split('\n').filter((l) => /offline|SendPeer|dial|inbound peer|unknown peer|queued|flushed|ack/.test(l)).slice(-25);
         if (rel.length) console.error(`--- ${tag}.log (offline/peer) ---\n${rel.join('\n')}`);
       } catch {}
     }

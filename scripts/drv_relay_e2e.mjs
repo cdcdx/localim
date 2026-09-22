@@ -111,8 +111,8 @@ async function main() {
     const hello = (cd) => cd.ev(`(() => window.__localim.native.request('identity','hello',{}).then(r=>JSON.stringify({id:r.deviceId,name:r.name})).catch(e=>'ERR:'+e))()`)
       .then((s) => JSON.parse(s).id);
     const [aId, bId] = await Promise.all([hello(a), hello(b)]);
-    console.log('[0] daemon 身份 A=%s B=%s', (aId || '').slice(0, 8), (bId || '').slice(0, 8));
-    if (!aId || !bId) throw new Error('身份解析失败');
+    console.log('[0] daemon identity A=%s B=%s', (aId || '').slice(0, 8), (bId || '').slice(0, 8));
+    if (!aId || !bId) throw new Error('failed to resolve identity');
 
     // 阶段1+2: A/B 经 relay 互发现。两类网段无局域网互发现(各自 presence 端口不同)，
     // 只能靠 relay 广播 peer_online → daemon peers_ → roster.list。轮询时补拉 roster。
@@ -123,13 +123,13 @@ async function main() {
       return has; })()`;
     const aSeesB = await waitFor(a, other(bId), 40, 500);
     const bSeesA = await waitFor(b, other(aId), 40, 500);
-    console.log('[1] 经 relay 互发现: A 见 B=%s  B 见 A=%s', aSeesB, bSeesA);
+    console.log('[1] mutual discovery via relay: A sees B=%s  B sees A=%s', aSeesB, bSeesA);
     if (!(aSeesB && bSeesA)) {
-      throw new Error('relay 互发现失败（无局域网组播，应仅经 relay 发现）');
+      throw new Error('mutual discovery via relay failed (no LAN multicast, should rely on relay only)');
     }
     const aPeerVia = await a.ev(`(() => { const p=window.__localim.app.state.peers.get(${JSON.stringify(bId)}); return p? (p.via||'?') : 'none'; })()`);
     const bPeerVia = await b.ev(`(() => { const p=window.__localim.app.state.peers.get(${JSON.stringify(aId)}); return p? (p.via||'?') : 'none'; })()`);
-    console.log('[1] via 标记: A→B via=%s  B→A via=%s', aPeerVia, bPeerVia);
+    console.log('[1] via flag: A->B via=%s  B->A via=%s', aPeerVia, bPeerVia);
 
     // 阶段3: 直拨互发文字。A 发 → B 收到；B 回 → A 收到。
     const unique = `relay-${Date.now()}`;
@@ -137,13 +137,13 @@ async function main() {
     const bGot = await waitFor(b, `(() => { const L=window.__localim; if(!L) return false;
       for(const [,arr] of L.app.state.conversations){ for(const it of arr) if(it.body===${JSON.stringify('hi-via-relay-' + unique)} && it.from!==L.app.state.profile?.deviceId) return true; }
       return false; })()`, 60, 400);
-    console.log('[2] A→B(经relay发现后直拨): B 收到=%s', bGot);
-    if (!bGot) throw new Error('A→B 文字未达');
+    console.log('[2] A->B (direct dial after relay discovery): B received=%s', bGot);
+    if (!bGot) throw new Error('A->B text not delivered');
     await b.ev(`(() => window.__localim.native.request('message','send',{to:${JSON.stringify(aId)},kind:'chat',body:${JSON.stringify('reply-from-B-' + unique)}}).then(()=>true).catch(()=>false))()`);
     const aGot = await waitFor(a, `(() => { const L=window.__localim; if(!L) return false;
       for(const [,arr] of L.app.state.conversations){ for(const it of arr) if(it.body===${JSON.stringify('reply-from-B-' + unique)} && it.from!==L.app.state.profile?.deviceId) return true; }
       return false; })()`, 60, 400);
-    console.log('[3] B→A: A 收到=%s', aGot);
+    console.log('[3] B->A: A received=%s', aGot);
 
     // 阶段4: 停 B(daemon+其 Edge) → A 应收到 peer_offline（relay 注销并广播）。
     // 注意只停 B 侧：A 的 CDP 仍要用于轮询，不能动。
@@ -154,7 +154,7 @@ async function main() {
       return !L.app.state.peers.has(${JSON.stringify(bId)}); })()`, 40, 400);
     const pass = aSeesB && bSeesA && (aPeerVia === 'relay' || aPeerVia === '?') &&
                  bGot && aGot && aLostB;
-    console.log('[4] B 下线 → A 侧 peer 移除=%s', aLostB);
+    console.log('[4] B offline -> peer removed on A=%s', aLostB);
     if (!aLostB) {
       try {
         const rl2 = readFileSync(join(rl, 'relay.log'), 'utf8');
@@ -167,7 +167,7 @@ async function main() {
         if (rel.length) console.error(`--- A.log ---\n${rel.join('\n')}`);
       } catch {}
     }
-    console.log('=== relay 跨网段发现+直拨文字互达: ' + (pass ? 'PASS' : 'FAIL') + ' ===');
+    console.log('=== relay cross-subnet discovery + direct-dial text exchange: ' + (pass ? 'PASS' : 'FAIL') + ' ===');
 
     await cleanup();
     process.exit(pass ? 0 : 3);

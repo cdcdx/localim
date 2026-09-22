@@ -64,18 +64,18 @@ function parseFrame(buf) {
 
 async function main() {
   const ui = await handshake(9165)
-  log('B:9165 webui 订阅 OK')
+  log('B:9165 webui subscribed OK')
   const got = new Promise((resolve) => {
-    ui.onMessage((op, text) => { try { const o = JSON.parse(text); log('B:9165 收到:', o.ns+'.'+o.m, JSON.stringify(o.d)); if (o.ns==='message') resolve(o) } catch {} })
+    ui.onMessage((op, text) => { try { const o = JSON.parse(text); log('B:9165 received:', o.ns+'.'+o.m, JSON.stringify(o.d)); if (o.ns==='message') resolve(o) } catch {} })
   })
   const peer = await handshake(9167)
-  log('B:9167 对端握手 OK')
+  log('B:9167 peer handshake OK')
   const pkt = { kind:'text', text:'manual probe @ '+Date.now(), channel:'chat', to:'*' }
   const env = JSON.stringify({ v:1, dir:'req', ns:'message', m:'relay', fromId:'FAKEPEER0000000000000000', pkt })
   peer.send(env)
-  log('已向 B:9167 发送 relay')
-  const o = await Promise.race([ got, new Promise((_, r) => setTimeout(() => r(new Error('B:9165 未收到广播')), 6000)) ])
-  log('=== B 端接收环 OK：webui 收到 message.'+o.m+' ===')
+  log('relay sent to B:9167')
+  const o = await Promise.race([ got, new Promise((_, r) => setTimeout(() => r(new Error('B:9165 received no broadcast')), 6000)) ])
+  log('=== B receive loop OK: webui got message.'+o.m+' ===')
   ui.socket.end(); peer.socket.end(); process.exit(0)
 }
 main().catch((e) => { console.error('FAIL', e.message); process.exit(1) })

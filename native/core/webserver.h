@@ -2,6 +2,7 @@
 #ifndef LOCALIM_CORE_WEBSERVER_H_
 #define LOCALIM_CORE_WEBSERVER_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 

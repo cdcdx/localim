@@ -2,6 +2,7 @@
 #ifndef LOCALIM_CORE_DAEMON_H_
 #define LOCALIM_CORE_DAEMON_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>

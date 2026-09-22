@@ -31,18 +31,18 @@ function Find-DepotTools {
     }
     # 退而检查 PATH
     if (Get-Command gn -ErrorAction SilentlyContinue) { return $env:PATH }
-    throw "未找到 depot_tools(需含 gn.bat)。设置 DEPOT_TOOLS 后重试。"
+    throw "depot_tools not found (must contain gn.bat). Set DEPOT_TOOLS and retry."
 }
 $DepotTools = Find-DepotTools
 if ($DepotTools -ne $env:PATH) { $env:PATH = $DepotTools + ";" + $env:PATH }
 $env:CHROME_HEADLESS = "1"
 Write-Host "[localim] depot_tools: $DepotTools"
-if (-not (Get-Command gn -ErrorAction SilentlyContinue)) { throw "gn 不在 PATH" }
+if (-not (Get-Command gn -ErrorAction SilentlyContinue)) { throw "gn is not in PATH" }
 
 # ---- 2. 挂载 src\localim junction -> ..\localim（首跑建立） ----
 $mount = Join-Path $ChromiumSrc "localim"
 if (-not (Test-Path $mount)) {
-    Write-Host "[localim] 挂载 $mount -> $LocalIm"
+    Write-Host "[localim] mount $mount -> $LocalIm"
     New-Item -ItemType Junction -Path $mount -Target $LocalIm | Out-Null
 }
 
@@ -68,7 +68,7 @@ root_extra_deps = [
 ]
 "@
 [System.IO.File]::WriteAllText($argsFile, $content, (New-Object System.Text.UTF8Encoding($false)))
-if ($bomDetected) { Write-Host "[localim] args.gn 带 BOM，已重写为 UTF-8 无 BOM" }
+if ($bomDetected) { Write-Host "[localim] args.gn has BOM, rewritten as UTF-8 without BOM" }
 
 # ---- 4. gn gen + 构建 ----
 Set-Location $ChromiumSrc
@@ -76,36 +76,36 @@ Write-Host "[localim] gn gen(win)..."
 gn gen $OutDir
 if ($LASTEXITCODE -ne 0) { throw "gn gen failed" }
 
-Write-Host "[localim] 构建 localim_daemon + localim_relay(win)..."
+Write-Host "[localim] building localim_daemon + localim_relay (win)..."
 & "$DepotTools\autoninja.bat" -C $OutDir localim/native:localim_daemon localim/native:localim_relay
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 # ---- 5. 产物 ----
 $exe = Join-Path $OutDir "localim_daemon.exe"
-if (-not (Test-Path $exe)) { throw "构建未产出 $exe" }
+if (-not (Test-Path $exe)) { throw "build produced no output at $exe" }
 $relay = Join-Path $OutDir "localim_relay.exe"
-if (-not (Test-Path $relay)) { throw "构建未产出 $relay" }
+if (-not (Test-Path $relay)) { throw "build produced no output at $relay" }
 Write-Host "[localim] OK: $exe"
-Write-Host "[localim] OK: $relay  (跨网段中继服务, 用法: $relay --relay-port=7618)"
-Write-Host "[localim] 运行: $exe --user-data-dir=%USERPROFILE%\.localim"
+Write-Host "[localim] OK: $relay  (cross-subnet relay service, usage: $relay --relay-port=7618)"
+Write-Host "[localim] run: $exe --user-data-dir=%USERPROFILE%\.localim"
 
 # ---- 5.5 可选: 拷贝 WebUI 产物到 exe 旁(已有构建产物时), 供 --webui-dist 使用 ----
 $webuiBuildDir = Join-Path $LocalIm "ui\out\webui"
 if (Test-Path (Join-Path $webuiBuildDir "index.html")) {
     $webuiStage = Join-Path $OutDir "webui"
-    Write-Host "[localim] 拷贝 WebUI 产物 -> $webuiStage"
+    Write-Host "[localim] copy WebUI artifacts -> $webuiStage"
     if (Test-Path $webuiStage) { Remove-Item -Recurse -Force $webuiStage }
     New-Item -ItemType Directory -Force -Path $webuiStage | Out-Null
     Copy-Item -Path (Join-Path $webuiBuildDir "*") -Destination $webuiStage -Recurse -Force
-    Write-Host "[localim] 托管运行: $exe --webui-dist=$webuiStage"
+    Write-Host "[localim] hosted run: $exe --webui-dist=$webuiStage"
 }
 
 # ---- 6. 可选: 一并构建 WebUI ----
 if ($env:BUILD_WEBUI -eq "1") {
     Push-Location (Join-Path $LocalIm "ui")
     try {
-        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "BUILD_WEBUI=1 但未找到 npm" }
-        Write-Host "[localim] 构建 WebUI..."
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "BUILD_WEBUI=1 but npm was not found" }
+        Write-Host "[localim] building WebUI..."
         npm install
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
         npm run build

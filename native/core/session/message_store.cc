@@ -38,7 +38,7 @@ void MessageStore::Load() {
     return;
   std::string raw;
   if (!base::ReadFileToString(path_, &raw)) {
-    LOG(WARNING) << "MessageStore: 读取历史失败 " << path_.AsUTF8Unsafe();
+    LOG(WARNING) << "MessageStore: failed to read history " << path_.AsUTF8Unsafe();
     return;
   }
   for (const auto& line : base::SplitString(
@@ -48,7 +48,7 @@ void MessageStore::Load() {
       continue;
     items_.push_back(parsed->GetDict().Clone());
   }
-  LOG(INFO) << "MessageStore: 载入 " << items_.size() << " 条历史 @ "
+  LOG(INFO) << "MessageStore: loaded " << items_.size() << " history items @ "
             << path_.AsUTF8Unsafe();
 }
 
@@ -68,7 +68,7 @@ bool MessageStore::Append(const base::DictValue& msg) {
     return false;
   line.push_back('\n');
   if (!base::AppendToFile(path_, line)) {
-    LOG(ERROR) << "MessageStore: 写入失败 " << path_.AsUTF8Unsafe();
+    LOG(ERROR) << "MessageStore: failed to write " << path_.AsUTF8Unsafe();
     return false;
   }
   items_.push_back(msg.Clone());

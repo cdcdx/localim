@@ -106,14 +106,14 @@ async function main() {
 
     for (const [n, cd] of [['A', a], ['B', b], ['C', c]]) {
       const ok = await waitFor(cd, `(() => { const L=window.__localim; if(!L) return false; return [...L.app.state.peers.keys()].filter(Boolean).length>=2; })()`, 60, 400);
-      if (!ok) throw new Error(`${n} 互发现未达两台`);
+      if (!ok) throw new Error(`${n} did not discover both peers`);
     }
-    console.log('[0] 互发现 A/B/C 各≥2');
+    console.log('[0] mutual discovery: A/B/C each >=2');
 
     const hello = (cd) => cd.ev(`(() => window.__localim.native.request('identity','hello',{}).then(r=>JSON.stringify({id:r.deviceId,name:r.name})).catch(e=>'ERR:'+e))()`)
       .then((s) => JSON.parse(s).id);
     const [aId, bId, cId] = await Promise.all([hello(a), hello(b), hello(c)]);
-    console.log('[0.5] daemon 身份 A=%s B=%s C=%s', (aId||'').slice(0, 8), (bId||'').slice(0, 8), (cId||'').slice(0, 8));
+    console.log('[0.5] daemon identity A=%s B=%s C=%s', (aId||'').slice(0, 8), (bId||'').slice(0, 8), (cId||'').slice(0, 8));
 
     async function warmup(targetId, cdRecv) {
       for (let i = 0; i < 12; i++) {
@@ -129,18 +129,18 @@ async function main() {
       return false;
     }
     const wB = await warmup(bId, b); const wC = await warmup(cId, c);
-    console.log('[0.5] 预热 A→B=%s A→C=%s', wB, wC);
-    if (!wB || !wC) throw new Error('预热连接未建立');
+    console.log('[0.5] warmup A->B=%s A->C=%s', wB, wC);
+    if (!wB || !wC) throw new Error('warmup connections not established');
 
-    const created = JSON.parse(await a.ev(`(() => window.__localim.native.request('room','create',{name:'研发组'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
+    const created = JSON.parse(await a.ev(`(() => window.__localim.native.request('room','create',{name:'RD Group'}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
     const roomId = created.roomId;
-    if (!roomId) throw new Error('建群失败');
+    if (!roomId) throw new Error('failed to create group');
     await a.ev(`(() => window.__localim.native.request('room','invite',{roomId:${JSON.stringify(roomId)},to:${JSON.stringify(bId)}}).then(()=>true))()`);
     await a.ev(`(() => window.__localim.native.request('room','invite',{roomId:${JSON.stringify(roomId)},to:${JSON.stringify(cId)}}).then(()=>true))()`);
     const gotRoom = (cd) => `(() => { const L=window.__localim; const r=L && L.app.state.rooms.get(${JSON.stringify(roomId)}); if(!r) return false; const m=r.members||[];
       return m.includes(${JSON.stringify(aId)}) && m.includes(${JSON.stringify(bId)}) && m.includes(${JSON.stringify(cId)}); })()`;
-    for (const [n, cd] of [['B', b], ['C', c]]) if (!(await waitFor(cd, gotRoom(cd), 60, 400))) throw new Error(`${n} 未收到完整群成员表`);
-    console.log('[1] 建群+邀请 ok roomId=%s', roomId);
+    for (const [n, cd] of [['B', b], ['C', c]]) if (!(await waitFor(cd, gotRoom(cd), 60, 400))) throw new Error(`${n} did not receive the full group member list`);
+    console.log('[1] group created + invited ok roomId=%s', roomId);
 
     const started = JSON.parse(await a.ev(`(() => window.__localim.startRoomShare(${JSON.stringify(roomId)}).then(r=>JSON.stringify(r)).catch(e=>'ERR:'+e))()`));
     await wait(2500);
@@ -154,7 +154,7 @@ async function main() {
       return callId;
     }
     const bCall = await accept(b); const cCall = await accept(c);
-    console.log('[3] B 接听=%s C 接听=%s', bCall, cCall);
+    console.log('[3] B answered=%s C answered=%s', bCall, cCall);
 
     async function viewerConnected(cd) {
       return waitFor(cd, `(() => { const dbg=window.__localim.mediaDebug(); return dbg.length>0 && dbg.every(d=>d.pcState==='connected' && d.ice==='connected') && dbg.some(d=>d.remoteTracks.includes('video')); })()`, 60, 500);
@@ -162,15 +162,15 @@ async function main() {
     const [bOk, cOk] = [await viewerConnected(b), await viewerConnected(c)];
     const bW = await waitFor(b, `(() => { const v=document.querySelector('.vid.main'); return v && v.videoWidth>0; })()`, 60, 400);
     const cW = await waitFor(c, `(() => { const v=document.querySelector('.vid.main'); return v && v.videoWidth>0; })()`, 60, 400);
-    console.log('[4] B 收屏=%s wx%d   C 收屏=%s wx%d', bOk, bW, cOk, cW);
-    if (!(bOk && bW && cOk && cW)) throw new Error('观众未收屏');
+    console.log('[4] B receiving screen=%s wx%d   C receiving screen=%s wx%d', bOk, bW, cOk, cW);
+    if (!(bOk && bW && cOk && cW)) throw new Error('viewer did not receive the shared screen');
 
     // ===== 群共享远程控制 =====
     // 阶段6: B 请求控制 → A 浮层出 ctrlReq 待办
     await b.ev(`(() => { const L=window.__localim; return L.requestShareControl(${JSON.stringify(bCall)}); })()`);
     const reqSeen = await waitFor(a, `(() => { const m=window.__localim.app.state.media; return !!(m && m.roomShare && m.ctrlReq && m.ctrlReq.from===${JSON.stringify(bId)}); })()`, 60, 400);
-    console.log('[6] B 请求控制: 发出=true  A收到ctrlReq=%s', reqSeen);
-    if (!reqSeen) throw new Error('房主未收到控制请求');
+    console.log('[6] B requested control: sent=true  A got ctrlReq=%s', reqSeen);
+    if (!reqSeen) throw new Error('host did not receive the control request');
 
     // 拒绝路径：C 请求 → A 拒绝 → C 不进入控制
     await c.ev(`(() => { const m=window.__localim.app.state.media; return m ? window.__localim.requestShareControl(m.callId) : false; })()`);
@@ -179,21 +179,21 @@ async function main() {
     await wait(300);
     const cCtrl = await c.ev(`(!!(window.__localim.app.state.media && window.__localim.app.state.media.ctrl))`);
     await waitFor(a, `(() => { const m=window.__localim.app.state.media; return !m || m.ctrlReq?.from!==${JSON.stringify(cId)}; })()`, 20, 300);
-    console.log('[6b] C 请求→A 拒绝: C进入控制模式=%s (应为 false)', cCtrl);
-    if (cCtrl) throw new Error('拒绝后 C 不应进入控制');
+    console.log('[6b] C requested -> A denied: C entered control mode=%s (should be false)', cCtrl);
+    if (cCtrl) throw new Error('C should not enter control mode after being denied');
 
     // 阶段7: A 授权 B → B 进入控制 + renegotiation 建 data channel（两端 dc open）
     await a.ev(`(() => { const L=window.__localim; return L.resolveShareControlRequest(${JSON.stringify(bId)}, true); })()`);
     const bCtrl = await waitFor(b, `(() => (!!(window.__localim.app.state.media && window.__localim.app.state.media.ctrl)))()`, 60, 400);
     const [bDc, aDc] = [await waitFor(b, `(() => window.__localim.mediaDebug().some(d => d.pcState==='connected' && d.dc==='open'))()`, 40, 400),
       await waitFor(a, `(() => window.__localim.mediaDebug().some(s => s.mode==='share' && s.peerId===${JSON.stringify(bId)} && s.dc==='open'))()`, 40, 400)];
-    console.log('[7] A 授权B: B进入控制=%s  B端dc open=%s  A(B会话)dc open=%s', bCtrl, bDc, aDc);
+    console.log('[7] A granted B: B in control=%s  B dc open=%s  A (B session) dc open=%s', bCtrl, bDc, aDc);
     if (!(bCtrl && bDc && aDc)) {
       console.error('[dbg7] B offers=', await b.ev(`JSON.stringify(window.__localim.native.evlog.filter(e=>e.ns==='media').map(e=>e.m))`));
       console.error('[dbg7] A offers=', await a.ev(`JSON.stringify(window.__localim.native.evlog.filter(e=>e.ns==='media').map(e=>e.m))`));
       console.error('[dbg7] B shareSessions=', await b.ev(`JSON.stringify(window.__localim.mediaDebug().filter(s=>s.mode==='share'))`));
       console.error('[dbg7] A shareSessions=', await a.ev(`JSON.stringify(window.__localim.mediaDebug().filter(s=>s.mode==='share'))`));
-      throw new Error('控制通道未建立(renegotiation 失败)');
+      throw new Error('control channel not established (renegotiation failed)');
     }
 
     // 阶段8: B 回传键盘输入 → A daemon 远程注入(injected=1)
@@ -207,7 +207,7 @@ async function main() {
         if (t.includes('remote_input')) break; // 已看到 remote_input 但 injected 尚未=1
       } catch {}
     }
-    console.log('[8] B 回传输入 → A daemon注入 injected=%s', injected);
+    console.log('[8] B sent input -> A daemon injected=%s', injected);
 
     const aLog = () => { try { return readFileSync(join(da, 'a.log'), 'utf8'); } catch { return ''; } };
     const offerCount = () => (aLog().match(/inbound media signal .* m=offer/g) || []).length;
@@ -225,8 +225,8 @@ async function main() {
       if (/hosted=0 injected=0/.test(tail)) { refused = true; break; }
       if (/hosted=1 injected=1/.test(tail)) break; // 未解除武装，反例
     }
-    console.log('[9] B 结束控制: A控制者清空=%s  再回传输入被拒(hosted=0)=%s', cleared, refused);
-    if (!(cleared && refused)) throw new Error('结束控制后 A 未解除注入武装');
+    console.log('[9] B ended control: A controller cleared=%s  further input rejected (hosted=0)=%s', cleared, refused);
+    if (!(cleared && refused)) throw new Error('A did not disarm injection after control ended');
 
     // 阶段10: 二次授权 B（复用已建 data channel，不再产生新的 renegotiation）→ 房主撤销 → B 退出控制。
     await b.ev(`(() => window.__localim.requestShareControl(${JSON.stringify(bCall)}))()`);
@@ -239,12 +239,12 @@ async function main() {
     const bRevoked = await waitFor(b, `(() => !(window.__localim.app.state.media && window.__localim.app.state.media.ctrl))()`, 40, 300);
     const aCtrlEmpty = await waitFor(a, `(() => window.__localim.roomShareControllers(${JSON.stringify(roomId)}).length===0)()`, 40, 300);
     const reused = offersBeforeRelease === offersAfterRegrant && offersAfterRegrant > 0;
-    console.log('[10] 二次授权B: ctrl=%s 通道复用(offer %d→%d)=%s A控制者=%s  撤销→B退出=%s A清空=%s',
+    console.log('[10] re-granted B: ctrl=%s channel reused (offer %d->%d)=%s A controllers=%s  revoked->B exited=%s A cleared=%s',
       bCtrl2, offersBeforeRelease, offersAfterRegrant, reused, aCtrlList, bRevoked, aCtrlEmpty);
-    if (!(bCtrl2 && reused && bRevoked && aCtrlEmpty)) throw new Error('二次授权/撤销控制权链路异常');
+    if (!(bCtrl2 && reused && bRevoked && aCtrlEmpty)) throw new Error('re-grant/revoke control chain is broken');
 
     const pass = reqSeen && bCtrl && bDc && aDc && injected && !cCtrl && cleared && refused && bCtrl2 && reused && bRevoked && aCtrlEmpty;
-    console.log('=== 群共享内嵌远程控制: ' + (pass ? 'PASS（观众经房主授权后可操作共享屏幕，输入经 data channel 回传被控端注入；退出/撤销即解除注入武装）' : 'FAIL') + ' ===');
+    console.log('=== remote control inside group sharing: ' + (pass ? 'PASS (viewer can operate the shared screen once the host grants control; input goes back over the data channel and gets injected on the host; exiting/revoking disarms injection)' : 'FAIL') + ' ===');
     await cleanup();
     process.exit(pass ? 0 : 3);
   } catch (e) {
@@ -252,7 +252,7 @@ async function main() {
     for (const [lg, tag] of [[join(da, 'a.log'), 'A'], [join(db, 'b.log'), 'B'], [join(dc, 'c.log'), 'C']]) {
       try {
         const t = readFileSync(lg, 'utf8');
-        const rel = t.split('\n').filter((l) => /media|SendPeer|dial|未知对端|inbound/.test(l)).slice(-20);
+        const rel = t.split('\n').filter((l) => /media|SendPeer|dial|unknown peer|inbound/.test(l)).slice(-20);
         if (rel.length) console.error(`--- ${tag}.log (media/peer) ---\n${rel.join('\n')}`);
       } catch {}
     }

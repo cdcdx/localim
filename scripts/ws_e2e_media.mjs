@@ -33,11 +33,11 @@ function open(url) {
 }
 
 async function main() {
-  const A = await open(A_WS); log('A 连接 OK')
+  const A = await open(A_WS); log('A connected OK')
   const r = await A.request('roster', 'list', {})
   const peers = (r.d && r.d.peers) || []
-  log('A 在线表:', peers.map(p => `${p.name}@${p.port || '?'}`).join(', '))
-  const B = await open(B_WS); log('B 连接 OK')
+  log('A roster:', peers.map(p => `${p.name}@${p.port || '?'}`).join(', '))
+  const B = await open(B_WS); log('B connected OK')
 
   const callId = 'call-' + Date.now()
   // 订阅 B 侧 media 事件（offer + ice）
@@ -48,12 +48,12 @@ async function main() {
   const aGetIce = new Promise((res) => A.on((o) => { if (o.ns === 'media' && o.m === 'ice') res(o) }))
 
   const target = peers.find(p => p.port === 9127)
-  if (!target) { console.error('FAIL: A 未发现 B(9127)'); process.exit(1) }
+  if (!target) { console.error('FAIL: A did not discover B (9127)'); process.exit(1) }
   const toB = target.deviceId
   // B 侧用的 A 的 deviceId：从 B 的 roster 找 A
   const rb = await B.request('roster', 'list', {})
   const peersB = (rb.d && rb.d.peers) || []
-  log('B 在线表:', peersB.map(p => `${p.name}@${p.port||'?'}`).join(', '))
+  log('B roster:', peersB.map(p => `${p.name}@${p.port||'?'}`).join(', '))
   const selfA = peersB.find(p => p.port === 7117)
   const toA = selfA ? selfA.deviceId : toB // 容错：找不到就以同一 id 占位
   log('toB=', toB, 'toA=', toA)
@@ -65,25 +65,25 @@ async function main() {
   const i = await A.request('media', 'ice', { to: toB, callId, candidate: 'cand-ice-A-1', sdpMLineIndex: 0, sdpMid: '0' })
   log('A media.ice res: ok=', i.ok)
 
-  const bo = await Promise.race([bGetOffer, new Promise((_, rj) => setTimeout(() => rj(new Error('B 未收到 offer')), 8000))])
-  const bi = await Promise.race([bGetIce, new Promise((_, rj) => setTimeout(() => rj(new Error('B 未收到 ice')), 8000))])
+  const bo = await Promise.race([bGetOffer, new Promise((_, rj) => setTimeout(() => rj(new Error('B did not receive offer')), 8000))])
+  const bi = await Promise.race([bGetIce, new Promise((_, rj) => setTimeout(() => rj(new Error('B did not receive ice')), 8000))])
   const okOffer = bo.d && bo.d.callId === callId && bo.d.sdp && bo.d.from === toA
   const okIce = bi.d && bi.d.callId === callId && bi.d.candidate === 'cand-ice-A-1'
-  log('B offer 事件:', okOffer ? 'OK' : ('内容不符: ' + JSON.stringify(bo.d)), '| B ice 事件:', okIce ? 'OK' : ('不符: ' + JSON.stringify(bi.d)))
+  log('B offer event:', okOffer ? 'OK' : ('content mismatch: ' + JSON.stringify(bo.d)), '| B ice event:', okIce ? 'OK' : ('mismatch: ' + JSON.stringify(bi.d)))
 
   // B → A: answer + ice（B 以 toB 即自己视角，转发目标应为 toA）
   const an = await B.request('media', 'answer', { to: toA, callId, sdp: 'v=0 fake-answer-B' })
   log('B media.answer res: ok=', an.ok)
   const ac = await A.request('media', 'ice', { to: toB, callId, candidate: 'cand-ice-A-2', sdpMLineIndex: 0, sdpMid: '0' })
   log('A media.ice#2 res:', ac.ok)
-  const aa = await Promise.race([aGetAnswer, new Promise((_, rj) => setTimeout(() => rj(new Error('A 未收到 answer')), 8000))])
+  const aa = await Promise.race([aGetAnswer, new Promise((_, rj) => setTimeout(() => rj(new Error('A did not receive answer')), 8000))])
   const okAnswer = aa.d && aa.d.callId === callId && aa.d.sdp && aa.d.from === toB
-  log('A answer 事件:', JSON.stringify(aa.d))
+  log('A answer event:', JSON.stringify(aa.d))
   log('  callId match =', aa.d && aa.d.callId === callId, '| from===toB =', aa.d && aa.d.from === toB, '(toB=', toB, ')')
-  log('answer 校验:', okAnswer ? 'OK' : 'FAIL')
+  log('answer check:', okAnswer ? 'OK' : 'FAIL')
 
   const all = okOffer && okIce && okAnswer
-  log('=== WebRTC 信令中继 ' + (all ? 'OK：A/B 双向 offer/answer/ice 全部经 daemon 送达对端 WebUI' : 'FAIL') + ' ===')
+  log('=== WebRTC signaling relay ' + (all ? 'OK: bidirectional A/B offer/answer/ice all delivered to the peer WebUI via daemon' : 'FAIL') + ' ===')
   A.ws.close(); B.ws.close()
   process.exit(all ? 0 : 2)
 }

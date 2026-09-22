@@ -36,31 +36,31 @@ function open(url) {
 
 async function main() {
   const A = await open(A_WS)
-  log('A 连接 OK')
+  log('A connected OK')
   const r = await A.request('roster', 'list', {})
   const peers = r.d && r.d.peers ? r.d.peers : []
-  log('A 在线表:', peers.length, '->', peers.map(p => `${p.name}@${p.port || '?'}`).join(', '))
+  log('A roster:', peers.length, '->', peers.map(p => `${p.name}@${p.port || '?'}`).join(', '))
   const peerB = peers.find(p => p.port === 9167)
-  if (!peerB) { console.error('FAIL: A 未发现 B(9167)'); process.exit(1) }
+  if (!peerB) { console.error('FAIL: A did not discover B (9167)'); process.exit(1) }
 
   const B = await open(B_WS)
-  log('B 连接 OK')
-  B.on((o) => log('B 事件流(原样):', JSON.stringify(o)))
+  log('B connected OK')
+  B.on((o) => log('B event stream (raw):', JSON.stringify(o)))
   const received = new Promise((resolve) => {
-    B.on((o) => { if (o.ns === 'message') { log('B 收到 message 事件:', JSON.stringify(o)); resolve(o) } })
+    B.on((o) => { if (o.ns === 'message') { log('B got message event:', JSON.stringify(o)); resolve(o) } })
   })
 
   const body = 'hello from A @ ' + Date.now()
   const sr = await A.request('message', 'send', { kind: 'text', text: body, channel: 'chat', to: peerB.deviceId })
-  log('A message.send 响应: ok=', sr.ok, 'accepted=', sr.d && sr.d.accepted)
+  log('A message.send response: ok=', sr.ok, 'accepted=', sr.d && sr.d.accepted)
 
   const got = await Promise.race([
     received,
-    new Promise((_, rej) => setTimeout(() => rej(new Error('B 未在 10s 内收到事件')), 10000)),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('B did not receive event within 10s')), 10000)),
   ])
 
   const ok = got.d && (got.d.body === body || got.d.text === body || got.d.content === body)
-  log('=== 单聊链路 ' + (ok ? 'OK：A 已发送，B 已收到文本' : '但内容未完全对齐: ' + JSON.stringify(got.d)) + ' ===')
+  log('=== 1:1 chat path ' + (ok ? 'OK: A sent, B received the text' : 'content mismatch: ' + JSON.stringify(got.d)) + ' ===')
   A.ws.close(); B.ws.close()
   process.exit(ok ? 0 : 2)
 }

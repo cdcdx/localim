@@ -6,6 +6,7 @@
 #define LOCALIM_CORE_CIPHER_H_
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace localim {

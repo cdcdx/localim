@@ -10,7 +10,6 @@
 #include "base/strings/escape.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/server/http_server_request_info.h"
@@ -27,8 +26,12 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
                                         "LocalIM static WebUI hosting");
 
 std::string LowerExt(const base::FilePath& path) {
-  std::string ext =
-      base::ToLowerASCII(base::WideToASCII(path.FinalExtension()));
+  // FinalExtension() 返回 FilePath::StringType：Windows 是 std::wstring，
+  // POSIX 是 std::string；而 base::WideToASCII() 只在 WCHAR_T_IS_16_BIT
+  // （即 Windows）下声明，macOS/Linux 直接用它会编译失败。
+  // 扩展名只需 ASCII，统一经 FilePath::MaybeAsASCII()（非 ASCII 返回空）取回。
+  std::string ext = base::ToLowerASCII(
+      base::FilePath(path.FinalExtension()).MaybeAsASCII());
   if (!ext.empty() && ext.front() == '.')
     ext.erase(ext.begin());
   return ext;
