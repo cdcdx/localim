@@ -1,0 +1,11 @@
+{
+  "name": "localim-dev",
+  "private": true,
+  "type": "module",
+  "description": "LocalIM@LAN dev 守护进程（node 协议子集）",
+  "scripts": {
+    "dev:daemon": "node daemon.mjs",
+    "noweb:daemon": "PORT_WEBUI=1 node daemon.mjs"
+  },
+  "engines": { "node": ">=16" }
+}
