@@ -1,0 +1,108 @@
+# LocalIM @ LAN — 本机守护进程（base+net 程序，无 content 嵌入）。
+# 依赖仅限 chromium/src 内组件：//base、//net、//url。不依赖 arupa / nomad 任何目录。
+# 窗口化外壳（content 嵌入器，承载 WebUI）为阶段 2，见 ../docs/roadmap.md。
+
+import("//build/config/ui.gni")
+
+# 本工程骨架代码的 -Werror 抑制：unchecked buffer usage / 静态容器析构是已接受的
+# 简化，不对其报错（否则 -Werror 会把骨架的 std::string 索引等都视作错误）。
+config("localim_warnings") {
+  cflags = [
+    "-Wno-unsafe-buffer-usage",
+    "-Wno-exit-time-destructors",
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# core：发现(lan_heartbeat + relay_client) + ws_hub(7615/7617) + 会话/群/文件/远程
+# ---------------------------------------------------------------------------
+static_library("localim_core") {
+  configs -= [ "//build/config/clang:find_bad_constructs" ]
+  configs += [ ":localim_warnings" ]
+
+  # 让子目录源以 native/ 为 include 根：`#include "core/..."`、`"platform/..."`。
+  include_dirs = [ "." ]
+
+  sources = [
+    "core/identity.cc",
+    "core/identity.h",
+    "core/daemon.cc",
+    "core/daemon.h",
+    "core/cipher.cc",
+    "core/cipher.h",
+    "core/ws_connection.cc",
+    "core/ws_connection.h",
+    "core/ws_hub.cc",
+    "core/ws_hub.h",
+    "core/webserver.cc",
+    "core/webserver.h",
+
+    "core/discovery/lan_heartbeat.cc",
+    "core/discovery/lan_heartbeat.h",
+    "core/discovery/relay_client.cc",
+    "core/discovery/relay_client.h",
+    "core/discovery/relay_server.cc",
+    "core/discovery/relay_server.h",
+
+    "core/session/peer_registry.cc",
+    "core/session/peer_registry.h",
+    "core/session/room_manager.cc",
+    "core/session/room_manager.h",
+    "core/session/message_store.cc",
+    "core/session/message_store.h",
+
+    "core/transport/file_transfer.cc",
+    "core/transport/file_transfer.h",
+
+    "core/remote/remote_control.cc",
+    "core/remote/remote_control.h",
+
+    "platform/input_injector.h",
+  ]
+
+  deps = [
+    "//base",
+    "//crypto",
+    "//net",
+    "//url",
+  ]
+
+  if (is_win) {
+    sources += [ "platform/input_injector_win.cc" ]
+    libs = [ "user32.lib" ]
+  } else if (is_mac) {
+    sources += [ "platform/input_injector_mac.mm" ]
+    libs = [ "Quartz.framework" ]
+  } else if (is_linux) {
+    sources += [ "platform/input_injector_linux.cc" ]
+    libs = [ "X11", "Xtst" ]
+  }
+
+  defines = [ "LOCALIM_CORE_IMPLEMENTATION" ]
+}
+
+executable("localim_daemon") {
+  sources = [ "app/localim_main.cc" ]
+  include_dirs = [ "." ]
+  configs -= [ "//build/config/clang:find_bad_constructs" ]
+  configs += [ ":localim_warnings" ]
+  deps = [ ":localim_core", "//base" ]
+  if (is_win) {
+    deps += [ "//build/win:default_exe_manifest" ]
+  }
+}
+
+group("native") {
+  deps = [ ":localim_daemon", ":localim_relay" ]
+}
+
+executable("localim_relay") {
+  sources = [ "app/relay_main.cc" ]
+  include_dirs = [ "." ]
+  configs -= [ "//build/config/clang:find_bad_constructs" ]
+  configs += [ ":localim_warnings" ]
+  deps = [ ":localim_core", "//base" ]
+  if (is_win) {
+    deps += [ "//build/win:default_exe_manifest" ]
+  }
+}
