@@ -60,6 +60,9 @@ bash localim/scripts/build_localim_unix.sh build static
 > `//chrome/BUILD.gn` 在 `enable_stripping` 分支给 `ldflags` 赋 `exported_symbols_list`，
 > `is_component_build` 分支再赋 `rpath`，gn 会报 `Replacing nonempty list`。
 > 脚本因此只在 `build static` 时开启剥离。
+>
+> macOS 已实测通过（Apple Silicon + macOS 26 SDK，`build static` 产出 daemon/relay，
+> 双实例端到端 3/3），详见 [roadmap](roadmap.md)「2026-09 追加（macOS 首编…）」。
 
 ---
 
@@ -197,6 +200,8 @@ node <chromium>/localim/scripts/ws_e2e.mjs
 | 同网段看不到设备 | 检查防火墙放行 **UDP 7616 入/出站**；确认组播未被交换机隔离 |
 | 跨网段找不到设备 | 需要运行 **relay（7618）** 中继，尚未随构建一起产出，见 roadmap |
 | Ubuntu 编译缺头文件 | 安装 `libxtst-dev`（`sudo apt install libxtst-dev`） |
+| 第二实例起不来 / 日志 `bind() failed: Address already in use` | 7615/7617 已被已有实例占用，给新实例加 `--webui-port`/`--peer-port`（presence 仍须同一组播口）；排查占用：`lsof -nP -i :7615`（Linux `ss -lntup`） |
+| macOS/Linux 启动即崩 `DCHECK failed: ...IsType(MessagePumpType::IO)` | 产物过旧，缺 net 所需的 IO 型 pump（已修）；重跑构建脚本拿到最新链接产物 |
 | 首启进程崩（退出码异常） | 组件构建需线程池：确认运行的 `localim_daemon` 是**最新重链产物**（older exe 缺线程池初始化） |
 
 ---

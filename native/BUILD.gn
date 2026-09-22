@@ -73,8 +73,15 @@ static_library("localim_core") {
   } else if (is_mac) {
     sources += [ "platform/input_injector_mac.mm" ]
     # macOS framework 必须走 frameworks（GN 禁止在 libs 里写 *.framework），
-    # 会展开为 -framework CoreGraphics（CGEvent 属于 CoreGraphics，非 Quartz）。
-    frameworks = [ "CoreGraphics.framework" ]
+    # 会展开为 -framework CoreGraphics（CGEvent 属于 CoreGraphics，非 Quartz）；
+    # CGEventCreate* 返回的 CF 对象需 CFRelease，故还要 CoreFoundation。
+    frameworks = [
+      "CoreGraphics.framework",
+      "CoreFoundation.framework",
+    ]
+    # .mm 被编成 ObjC++，静态初始化里 clang 会插入 autorelease pool，
+    # 需要显式链接 objc 运行时（否则 objc_autoreleasePoolPush/Pop 未定义）。
+    libs = [ "objc" ]
   } else if (is_linux) {
     sources += [ "platform/input_injector_linux.cc" ]
     libs = [ "X11", "Xtst" ]

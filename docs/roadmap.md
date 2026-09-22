@@ -11,7 +11,7 @@
 - [x] transport：`file_transfer` 元数据账本
 - [x] remote：`remote_control` + `input_injector` 三平台（win/mac/linux）
 - [x] `native/BUILD.gn` + `src/localim` 挂载 + 根 `gn_all` 登记，GN 解析通过
-- [x] 三平台构建脚本（`scripts/`：build_localim_win.ps1 / build_localim_unix.sh）——Windows 已实编出 `localim_daemon.exe`
+- [x] 三平台构建脚本（`scripts/`：build_localim_win.ps1 / build_localim_unix.sh）——Windows / macOS 已实编出 `localim_daemon`
 - [x] dev 守护进程（`dev/daemon/daemon.mjs` node 协议子集）——已修掩码/长帧解析，原生与真实客户端均验证通过
 
 **已完成（2026-09，Windows 实测）**：`localim_daemon` 编译+启动+三端口监听（7615/7616/7617），
@@ -44,14 +44,39 @@ B 解析入站并广播 `message.chat` 到其 WebUI 订阅 ✓。连续 3 次不
 同 nonce 重发去重仍 5，全部通过。
 
 ## 阶段 1 —— 端到端可用（三平台可跑）
-- [x] `scripts/`：win/mac/linux 构建脚本，产出可执行（win 已验证；mac/linux 待真机）
+- [x] `scripts/`：win/mac/linux 构建脚本，产出可执行（win / mac 已验证；linux 待真机）
 - [x] `dev/daemon`：node 版协议子集守护进程，喂 UI 联调（详见 docs/usage.md §5）
 - [x] `scripts/dev.mjs` + dev daemon 内嵌服务 WebUI 静态目录（out/webui）
-- [ ] 端到端：两台真机同网段互相发现 + 收发文字/图片（需两台机器实测）
+- [ ] 端到端：两台真机同网段互相发现 + 收发文字/图片（需两台机器实测；macOS 已以单机双实例验证发现+文字，见下方追加）
 - [x] 消息落库（JSONL 账本 `messages.jsonl`，`message.history` 重启可回看）——见 **2026-09 消息账本**
 - [x] native daemon 直接托管 WebUI（`--webui-dist` 指向 ui/out/webui，HTTP 7619；
       内置 `WebServer`（`core/webserver.*`）基于 `net::HttpServer` 静态托管，
       默认 index、MIME 映射、404、路径穿越防御）
+
+**2026-09 追加（macOS 首编 + 双实例端到端打通，Apple Silicon / macOS 26 SDK / arm64）**：
+`bash scripts/build_localim_unix.sh build static` 首次在 mac 上实编出 `localim_daemon` + `localim_relay`；
+按 docs/usage §7 起 A(7615/7616/7617, `--user-data-dir=/tmp/localim_a`) 与 B(9165/7616/9167,
+`--peer-port=9167`) 双实例：组播互发现 ✓（`roster.list` 双方各见对方 `via:lan`）；
+`ws_e2e.mjs` 5 项 `ok:true` + 聊天事件回声 + 未知方法 `-32601` ✓；
+`ws_e2e_onetoone.mjs` A→B 文字单聊连续 3/3 ✓（B 侧 `message.chat` 事件文本一致，daemon 日志
+`inbound peer message from <A>`）；`ws_history.mjs PHASE=send N=3` 落库 3 条、回放有序 ✓。
+排障修复 5 个根因：
+40. **gn gen 直接失败**——mac 上 `enable_stripping=true` 与 `is_component_build=true` 不可同时开：
+    上游 `//chrome/BUILD.gn` 在两分支各赋一次 `ldflags`，GN 报 `Replacing nonempty list`；
+    剥离改为仅 `build static` 时开启（`build static|component` 参数 / `LINK_MODE` 环境变量）。
+41. **`libs` 不能写 framework**——`libs = [ "Quartz.framework" ]` 被 GN 拒绝
+    （`Use frameworks to list framework dependencies`）；改 `frameworks = [ "CoreGraphics.framework" ]`
+    （CGEvent 属 CoreGraphics，非 Quartz）。
+42. **模块化编译要求头文件自包含**——6 个头文件用了 `uint8_t/uint16_t` 却缺 `<cstdint>`，
+    libc++ modules 下报 `must be imported from module ... before it is required`
+    （`cipher.h / peer_registry.h / relay_server.h / daemon.h / webserver.h / ws_hub.h`）。
+43. **启动即 FATAL**（非编译问题）——`base::CurrentIOThread::Get()` 要求所在线程 pump 为 IO 型；
+    daemon 主线程原为 UI、`localim-io` 线程为 `base::Thread` 缺省 DEFAULT，首处 net IO 即崩
+    （`DCHECK failed: sequence_manager->IsType(MessagePumpType::IO)`）；两处统一改为
+    `MessagePumpType::IO`（后者经 `Thread::StartWithOptions`）。Windows/Linux 同此约束，一并受益。
+44. **`base::WideToASCII` 仅 Windows 可见**——受 `#if defined(WCHAR_T_IS_16_BIT)` 限制，
+    `FilePath::StringType` 在 POSIX 是 `std::string` 故名不存在；`webserver.cc` 取扩展名改走
+    `FilePath::MaybeAsASCII()`，三平台统一。
 
 ## 阶段 2 —— 媒体 / 远程
 - [x] WebRTC offer/answer/ice 经守护进程信令中继打通（daemon 中继信封 + 前端 RTCPeerConnection 接线）
