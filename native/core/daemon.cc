@@ -2,6 +2,7 @@
 // 会话/群/文件/远程，并把控制面信封派发到各业务命名空间。
 #include "core/daemon.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -49,16 +50,31 @@ constexpr base::TimeDelta kFrameWindow = base::Minutes(2);
 
 namespace {
 
-std::string FirstLanIPv4() {
-  // 骨架阶段取本机非回环 IPv4；多网卡/多网段留待真实网关模式细化。
-  net::NetworkInterfaceList list;
-  if (!net::GetNetworkList(&list, net::INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES))
-    return "127.0.0.1";
-  for (const auto& nic : list) {
-    if (nic.address.IsIPv4() && !nic.address.IsLoopback())
-      return nic.address.ToString();
+// 从 presence/注册载荷里抽出多网卡候选地址：既接受 ["1.2.3.4"] 也接受 [{"ip":"1.2.3.4"}]。
+std::vector<std::string> ExtractAddrs(const base::DictValue& d) {
+  std::vector<std::string> out;
+  const base::ListValue* list = d.FindList("addrs");
+  if (!list)
+    return out;
+  for (const auto& v : *list) {
+    if (const std::string* s = v.GetIfString()) {
+      out.push_back(*s);
+    } else if (const base::DictValue* sub = v.GetIfDict()) {
+      if (const std::string* ip = sub->FindString("ip"))
+        out.push_back(*ip);
+    }
   }
-  return "127.0.0.1";
+  return out;
+}
+
+std::string JoinAddrs(const std::vector<IfAddr>& ifaces) {
+  std::string out;
+  for (const auto& a : ifaces) {
+    if (!out.empty())
+      out += ", ";
+    out += a.ip + "/" + base::NumberToString(a.prefix) + "(" + a.name + ")";
+  }
+  return out;
 }
 
 std::string DumpDict(const base::DictValue& d) {
@@ -168,13 +184,10 @@ void Daemon::StartOnIo() {
     web_server_->Start(ports_.web);
   }
 
-  const std::string self_payload = DumpDict(base::DictValue()
-      .Set("deviceId", profile_.device_id)
-      .Set("name", profile_.name)
-      .Set("platform", profile_.platform)
-      .Set("version", profile_.version)
-      .Set("host", FirstLanIPv4())
-      .Set("port", static_cast<int>(ports_.peer)));
+  locals_ = LocalIfAddrs();
+  LOG(INFO) << "local interfaces (" << locals_.size() << "): " << JoinAddrs(locals_);
+  // 公告/注册载荷带本机全部网卡地址（addrs），供多网段对端选路。
+  const std::string self_payload = SelfPayload();
 
   heartbeat_ = std::make_unique<LanHeartbeat>(
       net::IPEndPoint(net::IPAddress(239, 255, 0, 16), ports_.presence),
@@ -203,9 +216,49 @@ void Daemon::StartOnIo() {
       kPeerTimeout);
 }
 
+// 身份/注册载荷：deviceId + 主地址 host + 多网卡候选 addrs（[{ip,prefix,if}]）。
+std::string Daemon::SelfPayload() const {
+  base::ListValue addrs;
+  for (const auto& a : locals_) {
+    base::DictValue e;
+    e.Set("ip", a.ip);
+    e.Set("prefix", static_cast<int>(a.prefix));
+    e.Set("if", a.name);
+    addrs.Append(std::move(e));
+  }
+  base::DictValue self;
+  self.Set("deviceId", profile_.device_id);
+  self.Set("name", profile_.name);
+  self.Set("platform", profile_.platform);
+  self.Set("version", profile_.version);
+  self.Set("host", PrimaryLocalAddr(locals_));
+  self.Set("port", static_cast<int>(ports_.peer));
+  self.Set("addrs", std::move(addrs));
+  return DumpDict(self);
+}
+
+// 网卡快照变化（插拔网线 / Wi-Fi 切换 / VPN 拨号）时刷新：
+// 重建每网卡组播 socket，并重发 presence 与 relay 注册，让对端拿到新地址表。
+void Daemon::RefreshLocalIfaces() {
+  const std::vector<IfAddr> now = LocalIfAddrs();
+  if (now.empty() || now == locals_)
+    return;  // 枚举为空（隧道/沙箱环境）时不拆现有配置。
+  locals_ = now;
+  LOG(INFO) << "local interfaces changed (" << locals_.size() << "): "
+            << JoinAddrs(locals_);
+  if (heartbeat_) {
+    heartbeat_->SetPayload(SelfPayload());
+    heartbeat_->RefreshIfaces();
+    heartbeat_->Announce();
+  }
+  if (relay_)
+    relay_->SetRegisterPayload(SelfPayload());
+}
+
 void Daemon::PruneStalePeers() {
   if (!started_)
     return;
+  RefreshLocalIfaces();
   peers_.PruneStale(kPeerTimeout);
   base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE,
@@ -392,7 +445,11 @@ void Daemon::SendPeerEnvelope(const std::string& device_id,
   relay.Set("dir", "req");
   // 携带发送方地址：收端据此补记 peer 记录，使回执等回复能在对端重启/新上线时立即拨号回来，
   // 不必等 presence 心跳（否则会出现"刚上线、尚未记到对端地址 → 回执发不出去"的竞态）。
-  relay.Set("fromHost", FirstLanIPv4());
+  // 多网卡时选"与对端同网段"的那个源地址，对端回拨才会走本网段。
+  const std::string peer_addr = PickPeerAddress(device_id);
+  relay.Set("fromHost", peer_addr.empty()
+                            ? PrimaryLocalAddr(locals_)
+                            : PickLocalAddrFor(peer_addr, locals_));
   relay.Set("fromPort", static_cast<int>(ports_.peer));
   // 出向认证：--psk 模式下对整信封(除 ts/nonce/sig)做 HMAC-SHA256 签名，附带
   // 时间戳与随机 nonce，供收端验签、限时与防重放。明文模式不加字段，与旧版一致。
@@ -415,28 +472,82 @@ void Daemon::SendPeerEnvelope(const std::string& device_id,
     it->second->SendText(relay_json);
     return;
   }
-  PeerRecord* rec = peers_.Find(device_id);
-  if (!rec || rec->host.empty()) {
-    LOG(WARNING) << "SendPeer: no peer address for " << device_id;
+  // 无既有连接：按候选地址顺序拨号（失败自动换下一个）。
+  DialNext(device_id, std::move(relay_json));
+}
+
+std::vector<std::string> Daemon::PeerCandidates(const PeerRecord& rec) const {
+  std::vector<std::string> cands = rec.addrs;
+  if (!rec.host.empty())
+    cands.push_back(rec.host);
+  std::vector<std::string> ranked = RankPeerAddrs(cands, locals_);
+  // 上次拨通的地址优先复用，避免每次都从新候选重新试连（失败时仍会顺位降级）。
+  auto r = route_.find(rec.device_id);
+  if (r != route_.end()) {
+    auto hit = std::find(ranked.begin(), ranked.end(), r->second);
+    if (hit != ranked.end() && hit != ranked.begin())
+      std::rotate(ranked.begin(), hit, hit + 1);
+  }
+  return ranked;
+}
+
+std::string Daemon::PickPeerAddress(const std::string& device_id) {
+  const PeerRecord* rec = peers_.Find(device_id);
+  if (!rec)
+    return std::string();
+  const std::vector<std::string> plan = PeerCandidates(*rec);
+  return plan.empty() ? std::string() : plan.front();
+}
+
+// 按候选地址依次拨号：pending_json 非空时作为拨通后补发的帧（连接已存在时不会走到这里）。
+void Daemon::DialNext(const std::string& device_id, std::string pending_json) {
+  if (Connected(device_id))
+    return;
+  const PeerRecord* rec = peers_.Find(device_id);
+  if (!rec) {
+    LOG(WARNING) << "SendPeer: no peer record for " << device_id;
     return;
   }
+  auto plan_it = dial_plan_.find(device_id);
+  if (plan_it == dial_plan_.end()) {
+    const std::vector<std::string> plan = PeerCandidates(*rec);
+    if (plan.empty()) {
+      LOG(WARNING) << "SendPeer: no peer address for " << device_id;
+      return;
+    }
+    plan_it = dial_plan_.emplace(device_id, plan).first;
+    dial_idx_[device_id] = 0;
+  }
+  const std::vector<std::string>& plan = plan_it->second;
+  size_t& idx = dial_idx_[device_id];
   const uint16_t port = rec->port ? rec->port : ports_.peer;
-  const auto parsed_ip = net::IPAddress::FromIPLiteral(rec->host);
-  const net::IPAddress addr =
-      parsed_ip ? *parsed_ip : net::IPAddress::IPv4Localhost();
-  auto socket = std::make_unique<net::TCPClientSocket>(
-      net::AddressList(net::IPEndPoint(addr, port)), nullptr, nullptr, nullptr,
-      net::NetLogSource(), net::handles::kInvalidNetworkHandle);
-  net::StreamSocket* sock = socket.get();
-  dialing_[device_id] = std::move(socket);
-  pending_out_[device_id] = std::move(relay_json);
-  const int rv = sock->Connect(
-      base::BindOnce(&Daemon::OnPeerDialResult, weak_factory_.GetWeakPtr(),
-                     device_id, rec->host, port));
-  LOG(INFO) << "SendPeer: dial " << device_id << " " << rec->host << ":" << port
-            << " rv=" << rv;
-  if (rv != net::ERR_IO_PENDING)
-    OnPeerDialResult(device_id, rec->host, port, rv);
+  while (idx < plan.size()) {
+    const std::string host = plan[idx++];
+    auto parsed_ip = net::IPAddress::FromIPLiteral(host);
+    if (!parsed_ip)
+      continue;  // 非法候选跳过，继续下一个。
+    if (!pending_json.empty())
+      pending_out_[device_id] = std::move(pending_json);
+    auto socket = std::make_unique<net::TCPClientSocket>(
+        net::AddressList(net::IPEndPoint(*parsed_ip, port)), nullptr, nullptr,
+        nullptr, net::NetLogSource(), net::handles::kInvalidNetworkHandle);
+    net::StreamSocket* sock = socket.get();
+    dialing_[device_id] = std::move(socket);
+    const int rv = sock->Connect(
+        base::BindOnce(&Daemon::OnPeerDialResult, weak_factory_.GetWeakPtr(),
+                       device_id, host, port));
+    LOG(INFO) << "SendPeer: dial " << device_id << " " << host << ":" << port
+              << " (cand " << idx << "/" << plan.size() << ") rv=" << rv;
+    if (rv != net::ERR_IO_PENDING)
+      OnPeerDialResult(device_id, host, port, rv);
+    return;
+  }
+  // 候选全部失败：丢弃待发帧，清空选路计划等下一次 presence 刷新候选表。
+  LOG(WARNING) << "peer dial exhausted: " << device_id
+               << " candidates=" << plan.size();
+  dial_plan_.erase(device_id);
+  dial_idx_.erase(device_id);
+  pending_out_.erase(device_id);
 }
 
 void Daemon::OnPeerDialResult(const std::string& device_id,
@@ -447,10 +558,18 @@ void Daemon::OnPeerDialResult(const std::string& device_id,
   std::unique_ptr<net::StreamSocket> socket = std::move(it->second);
   dialing_.erase(it);
   if (rv != net::OK) {
-    LOG(WARNING) << "peer dial failed: " << device_id << " rv=" << rv;
-    pending_out_.erase(device_id);
+    LOG(WARNING) << "peer dial failed: " << device_id << " @" << host << ":"
+                 << port << " rv=" << rv;
+    auto r = route_.find(device_id);
+    if (r != route_.end() && r->second == host)
+      route_.erase(r);  // 原优选地址不通：退回按排序重新选路。
+    // 换下一个候选地址（多网卡/多网段），候选耗尽才丢弃待发帧。
+    DialNext(device_id, std::string());
     return;
   }
+  route_[device_id] = host;
+  dial_plan_.erase(device_id);
+  dial_idx_.erase(device_id);
   auto conn = std::make_unique<WsConnection>(
       std::move(socket),
       base::BindRepeating(&Daemon::OnOutgoingFrame, weak_factory_.GetWeakPtr(),
@@ -501,25 +620,9 @@ void Daemon::QueueOffline(const std::string& device_id, base::DictValue msg) {
 bool Daemon::EnsureConnection(const std::string& device_id) {
   if (Connected(device_id) || dialing_.count(device_id))
     return Connected(device_id);
-  PeerRecord* rec = peers_.Find(device_id);
-  if (!rec || rec->host.empty())
-    return false;  // 尚不知其地址：等 peer 上线事件后再补。
-  const uint16_t port = rec->port ? rec->port : ports_.peer;
-  const auto parsed_ip = net::IPAddress::FromIPLiteral(rec->host);
-  const net::IPAddress addr =
-      parsed_ip ? *parsed_ip : net::IPAddress::IPv4Localhost();
-  auto socket = std::make_unique<net::TCPClientSocket>(
-      net::AddressList(net::IPEndPoint(addr, port)), nullptr, nullptr, nullptr,
-      net::NetLogSource(), net::handles::kInvalidNetworkHandle);
-  net::StreamSocket* sock = socket.get();
-  dialing_[device_id] = std::move(socket);
-  const int rv = sock->Connect(
-      base::BindOnce(&Daemon::OnPeerDialResult, weak_factory_.GetWeakPtr(),
-                     device_id, rec->host, port));
-  LOG(INFO) << "EnsureConn: dial " << device_id << " rv=" << rv;
-  if (rv != net::ERR_IO_PENDING)
-    OnPeerDialResult(device_id, rec->host, port, rv);
-  return false;
+  // 按候选地址顺序拨号（纯建连，成功后统一 FlushQueue 补投）。
+  DialNext(device_id, std::string());
+  return Connected(device_id);
 }
 
 // 对方上线/连接就绪时补投整队离线消息（按入队顺序）。
@@ -730,6 +833,7 @@ void Daemon::OnHubMessage(int client_id, uint16_t port,
         PeerRecord rec;
         rec.device_id = from_id;
         rec.host = *from_host;
+        rec.addrs.push_back(*from_host);
         rec.port = static_cast<uint16_t>(parsed->FindInt("fromPort").value_or(0));
         rec.via = "lan";
         peers_.Upsert(rec);
@@ -810,6 +914,10 @@ void Daemon::Dispatch(int client_id, const std::string& ns,
     if (method == "list") {
       base::ListValue peers;
       for (const auto& rec : peers_.List()) {
+        // addrs：已知的候选地址（按当前选路排序），便于排障"从哪个地址拨通"。
+        base::ListValue addrs;
+        for (const auto& a : PeerCandidates(rec))
+          addrs.Append(a);
         peers.Append(base::DictValue()
             .Set("deviceId", rec.device_id)
             .Set("name", rec.name)
@@ -817,6 +925,7 @@ void Daemon::Dispatch(int client_id, const std::string& ns,
             .Set("netmask", rec.netmask)
             .Set("via", rec.via)
             .Set("port", static_cast<int>(rec.port))
+            .Set("addrs", std::move(addrs))
             .Set("lastSeen", static_cast<double>(rec.last_seen_ms))
             .Set("caps", base::Value(base::ListValue()
                 .Append("chat").Append("media")
@@ -1123,7 +1232,7 @@ void Daemon::SendToWebUi(const std::string& json) {
   }
 }
 
-void Daemon::OnLanPeer(const std::string& peer_json) {
+void Daemon::OnLanPeer(const std::string& peer_json, const std::string& src_ip) {
   auto d = base::JSONReader::ReadDict(peer_json, base::JSON_PARSE_RFC);
   if (!d)
     return;
@@ -1134,12 +1243,24 @@ void Daemon::OnLanPeer(const std::string& peer_json) {
   PeerRecord rec;
   rec.device_id = id;
   rec.name = GetStr(*d, "name", id);
-  rec.host = GetStr(*d, "host", "");
   rec.port = static_cast<uint16_t>(d->FindInt("port").value_or(0));
   rec.via = "lan";
+  // 候选地址：组播源地址（本网段一定可达）优先，其次对端公告的多网卡地址，最后宿主 host。
+  // 排序由 RankPeerAddrs 完成（同子网 > 私网 > 链路本地 > 公网 > 回环）。
+  std::vector<std::string> cands;
+  if (!src_ip.empty())
+    cands.push_back(src_ip);
+  for (const auto& a : ExtractAddrs(*d))
+    cands.push_back(a);
+  rec.addrs = cands;
+  const std::vector<std::string> ranked = RankPeerAddrs(cands, locals_);
+  rec.host = ranked.empty() ? GetStr(*d, "host", "") : ranked.front();
   peers_.Upsert(rec);
   MaybeRedeliver(id);  // 对方（重新）上线：补投离线队列
 
+  base::ListValue addrs;
+  for (const auto& a : ranked)
+    addrs.Append(a);
   base::DictValue peer = base::DictValue()
       .Set("deviceId", id)
       .Set("name", rec.name)
@@ -1147,6 +1268,7 @@ void Daemon::OnLanPeer(const std::string& peer_json) {
       .Set("netmask", "")
       .Set("via", "lan")
       .Set("port", static_cast<int>(rec.port))
+      .Set("addrs", std::move(addrs))
       .Set("lastSeen", static_cast<double>(rec.last_seen_ms))
       .Set("caps", base::Value(base::ListValue()
               .Append("chat").Append("media").Append("file")
@@ -1175,9 +1297,12 @@ void Daemon::OnRelayEvent(const std::string& json) {
       PeerRecord rec;
       rec.device_id = *id;
       rec.name = GetStr(*d, "name", *id);
-      rec.host = GetStr(*d, "host", "");
       rec.port = static_cast<uint16_t>(d->FindInt("port").value_or(0));
       rec.via = "relay";
+      // 跨网段：relay 透传对端全部候选地址，按"是否与我同子网/私网"排序后择优拨号。
+      rec.addrs = ExtractAddrs(*d);
+      const std::vector<std::string> ranked = RankPeerAddrs(rec.addrs, locals_);
+      rec.host = ranked.empty() ? GetStr(*d, "host", "") : ranked.front();
       peers_.Upsert(rec);
       MaybeRedeliver(*id);  // 对方（重新）上线：补投离线队列
     }

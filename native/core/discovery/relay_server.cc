@@ -219,17 +219,31 @@ void RelayServer::OnClientMessage(int client_id, const std::string& json) {
     return;  // 仅认携带身份的消息；骨架不处理匿名帧。
   // 注册（含重连/心跳重注册）。当前 RelayClient 的 register 载荷不带 op，按 deviceId 识别。
   if (op.empty() || op == "register") {
+    // 多网卡候选地址：既接受 ["1.2.3.4", ...] 也接受 [{"ip":"1.2.3.4","prefix":24}]，
+    // 统一归一成字符串数组后随 peer_online 透传。
+    std::vector<std::string> addrs;
+    if (const base::ListValue* list = d->FindList("addrs")) {
+      for (const auto& v : *list) {
+        if (const std::string* s = v.GetIfString()) {
+          addrs.push_back(*s);
+        } else if (const base::DictValue* sub = v.GetIfDict()) {
+          if (const std::string* ip = sub->FindString("ip"))
+            addrs.push_back(*ip);
+        }
+      }
+    }
     Register(client_id, {
         {"deviceId", device_id},
         {"name", GetStr(*d, "name", device_id)},
         {"host", GetStr(*d, "host", "")},
         {"port", std::to_string(d->FindInt("port").value_or(0))},
-    });
+    }, addrs);
   }
 }
 
 void RelayServer::Register(int client_id,
-                           const std::map<std::string, std::string>& fields) {
+                           const std::map<std::string, std::string>& fields,
+                           const std::vector<std::string>& addrs) {
   auto it = clients_.find(client_id);
   if (it == clients_.end())
     return;
@@ -245,6 +259,7 @@ void RelayServer::Register(int client_id,
   c.device_id = device_id;
   c.name = fields.at("name");
   c.host = fields.at("host");
+  c.addrs = addrs;
   uint32_t port = 0;
   c.port = base::StringToUint(fields.at("port"), &port) && port <= 65535
                ? static_cast<uint16_t>(port) : 0;
@@ -280,6 +295,12 @@ std::string RelayServer::BuildPeerOnlineJson(const Client& c) {
       .Set("host", c.host)
       .Set("port", static_cast<int>(c.port))
       .Set("via", "relay");
+  if (!c.addrs.empty()) {
+    base::ListValue addrs;
+    for (const auto& a : c.addrs)
+      addrs.Append(a);
+    d.Set("addrs", std::move(addrs));
+  }
   std::string out;
   base::JSONWriter::Write(d, &out);
   return out;

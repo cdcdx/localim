@@ -7,12 +7,14 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/functional/callback_forward.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "core/cipher.h"
+#include "core/discovery/lan_ifaces.h"
 #include "core/identity.h"
 #include "core/session/message_store.h"
 #include "core/session/peer_registry.h"
@@ -66,7 +68,8 @@ class Daemon {
   void StartOnIo();
   void OnHubMessage(int client_id, uint16_t port, const std::string& json);
   void OnHubClosed(int client_id);
-  void OnLanPeer(const std::string& peer_json);
+  // src_ip：这份 presence 从哪个源地址来（多网卡对端按它优先直连）。
+  void OnLanPeer(const std::string& peer_json, const std::string& src_ip);
   void OnRelayEvent(const std::string& json);
   void HandleEnvelope(int client_id, const std::string& json);
   void Dispatch(int client_id, const std::string& ns, const std::string& method,
@@ -87,6 +90,15 @@ class Daemon {
                       const std::string& inner_m, base::DictValue pkt);
   // 复用既有对端连接，否则拨号并暂存待发帧。
   void SendPeerEnvelope(const std::string& device_id, base::DictValue relay);
+  // 多网卡/多网段智能选路：
+  //  · RefreshLocalIfaces —— 刷新本机网卡快照（增删/换网段时重建组播与注册载荷）；
+  //  · PeerCandidates    —— 对端候选地址按"同子网优先"排序（上次拨通的地址优先复用）；
+  //  · DialNext          —— 按候选逐个拨号，失败自动换下一个，全部失败才丢弃待发帧。
+  void RefreshLocalIfaces();
+  std::string SelfPayload() const;
+  std::vector<std::string> PeerCandidates(const PeerRecord& rec) const;
+  std::string PickPeerAddress(const std::string& device_id);
+  void DialNext(const std::string& device_id, std::string pending_json);
   void OnPeerDialResult(const std::string& device_id, const std::string& host,
                         uint16_t port, int rv);
   // 离线投递：对方不在线时按设备入队，上线后补投；送达由对端回执确认。
@@ -136,6 +148,10 @@ class Daemon {
   std::map<std::string, std::unique_ptr<net::StreamSocket>> dialing_;  // devId -> 拨号中的 socket
   std::map<std::string, std::unique_ptr<WsConnection>> outgoing_;     // devId -> 已建立的对端连接
   std::map<std::string, std::string> pending_out_;                    // devId -> 待发的 pkt json
+  std::vector<IfAddr> locals_;                                        // 本机网卡快照（选路基准）
+  std::map<std::string, std::vector<std::string>> dial_plan_;         // devId -> 已排序候选地址
+  std::map<std::string, size_t> dial_idx_;                            // devId -> 下一个待试候选
+  std::map<std::string, std::string> route_;                          // devId -> 上次拨通的地址
   // 离线投递队列：devId -> 对方不在线期间入队的消息（FIFO，上限 kOfflineQueueCap）。
   std::map<std::string, std::vector<base::DictValue>> offline_q_;
   // 消息加密（AES-GCM 内容机密 + 信封 HMAC 认证/防重放）。

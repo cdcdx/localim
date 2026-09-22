@@ -15,11 +15,14 @@ namespace localim {
 struct PeerRecord {
   std::string device_id;
   std::string name;
-  std::string host;       // 直连 IP 或 relay 可达地址
+  std::string host;       // 直连 IP 或 relay 可达地址（当前选中/最近一次听到的）
   std::string netmask;
   std::string via;        // "lan" | "relay"
   uint16_t port = 0;      // 对端的 peer 监听口（公告携带；0 表示未知）
   long long last_seen_ms = 0;
+  // 多网卡候选地址（对端公告的 addrs，含历史听到的源地址）。拨号时按
+  // "与本网段同子网优先"排序逐个尝试；host 为其中当前最优的一个。
+  std::vector<std::string> addrs;
 };
 
 class PeerRegistry {

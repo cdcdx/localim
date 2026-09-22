@@ -54,6 +54,8 @@ class RelayServer {
     std::string name;
     std::string host;
     uint16_t port = 0;
+    // 多网卡候选地址（注册载荷的 addrs），原样透传给其它网段节点供选路。
+    std::vector<std::string> addrs;
   };
 
   void DoAccept();
@@ -67,10 +69,11 @@ class RelayServer {
   void OnClientClosed(int client_id);
 
   // 注册(含重新注册)：入库路由表；向新客户端回放既有 roster，并向其它客户端广播 online。
-  void Register(int client_id, const std::map<std::string, std::string>& fields);
+  void Register(int client_id, const std::map<std::string, std::string>& fields,
+                const std::vector<std::string>& addrs);
   // 向某客户端推送单个 peer_online(deviceId) 事件。
   void SendPeerOnline(int client_id, const std::string& device_id);
-  // 构造 {op:"peer_online", deviceId,name,host,port,via:"relay"}。
+  // 构造 {op:"peer_online", deviceId,name,host,port,addrs,via:"relay"}。
   static std::string BuildPeerOnlineJson(const Client& c);
   // 构造 {op:"peer_offline", deviceId}。
   static std::string BuildPeerOfflineJson(const std::string& device_id);

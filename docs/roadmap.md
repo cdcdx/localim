@@ -238,6 +238,27 @@ A 侧全会话按 nonce 扫描到 `delivered`。排障要点：
     localStorage 生成的 self id），发送消息落在发送方 daemon id 键下；前端不回显不落库、仅作展示，测试对
     发送态须按 nonce **全会话扫描**而非 `conversations.get(对端id)`。
 
+**2026-09 追加（多网卡 / 多网段智能选路）**：
+`core/discovery/lan_ifaces.*`（新）：枚举本机非回环 IPv4 网卡 + 候选地址排序（同子网 > 私网其它段 >
+链路本地 > 公网 > 回环）+ 选源址。presence 与 relay 注册载荷新增 `addrs`（全网卡
+`[{ip,prefix,if}]`），LAN 侧另把**组播源地址**作为首选候选；`PeerRegistry` 存候选表并在 `Upsert`
+时**合并**（而非整体替换）；拨号按候选逐个尝试，拨通者记为优选路由。
+增量验证：`scripts/ws_e2e_multiroute.mjs` PASS（relay 透传候选 + 按候选拨号送达），
+`scripts/ws_e2e_onetoone.mjs` 回归 1:1 仍 OK。排障要点：
+45. **组播只覆盖缺省网段**——单 socket bind `0.0.0.0` + `JoinGroup` 只锚在缺省接口，其它网段听不见
+    本机；改为**每网卡一套 socket**：`SetMulticastInterface(index)` 必须在 `Bind()` 之前调用
+    （POSIX 的 `JoinGroup` 用它作 `imr_ifindex`），同份 presence 在多网卡重复到达故按 800ms 窗口去重。
+46. **对端只有一个 host**——单地址公告在跨网段/多网卡场景只能撞运气；公告带全网卡 `addrs`，
+    relay 的 `Register`/`peer_online` 原样透传（兼容 `[ip]` 与 `[{ip,…}]` 两种写法）。
+47. **候选表被增量更新冲掉**——`PeerRegistry::Upsert` 原整体替换，peer 信封回执等"只带一个地址"的
+    路径会把多网卡候选清空；改为合并候选 + 空字段回落旧值。
+48. **拨号失败即丢帧**——原只拨 `rec->host` 一次，失败就丢待发帧（离线消息也一起丢）；改为按
+    排序候选逐个重试（`SendPeer: dial … (cand i/n)`），全部失败才丢帧并清空选路计划。
+49. **网卡变化后地址过期**——15s 周期任务里刷新网卡快照，变化时重建组播 socket、更新 presence 载荷
+    并重发 relay 注册（`RelayClient::SetRegisterPayload`），否则 VPN/Wi-Fi 切换后对端仍拨旧地址。
+50. **按索引加入组播可能整批失败**——部分虚拟网卡/Windows 下 `JoinGroup` 会失败；加"缺省接口单
+    socket"回退，避免整机发现功能失效。
+
 ## 阶段 3 —— 群聊与中继增强
 - [x] 群 mesh：房主广播/成员订阅，离线次级接替（离线次级接替仍为后续优化）
 - [x] relay 服务端（独立小服务 `localim_relay`）多网关注册与路由表
@@ -280,7 +301,7 @@ e2e 断言续传起点 `sndFrom>0` 且接收端累计 `recvBytes==size`（证明
 - [x] 离线消息（离线按设备入队 / 上线补投 / `message.ack` 送达回执 → WebUI「已送达」）
 - [x] 消息加密（`--psk` 预共享口令 → HKDF 派生子钥；文字 `body` 走 AES-256-GCM 机密+认证，peer 信封整体 HMAC-SHA256 签名 + 时间窗 + nonce 防重放；缺省明文保持兼容）
 - [ ] 自动升级、开机自启、托盘
-- [ ] 多网卡/多网段智能选路
+- [x] 多网卡/多网段智能选路（presence 每网卡各发一份 + 公告全网卡 `addrs` + 拨号按「同子网优先」逐个候选重试 + 网卡变化自动刷新）——见 **2026-09 追加（多网卡/多网段智能选路）**
 
 ## 决策记录
 - 与 arupa/nomad **完全隔离**，只依赖 `chromium/src` 内组件（用户硬约束）。

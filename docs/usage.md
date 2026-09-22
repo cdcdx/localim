@@ -169,6 +169,10 @@ localim_daemon --user-data-dir=~/.localim_b \
 | `--relay-port` | 7618 | 跨网段中继 |
 
 - 公告携带各自的 `peer-port`，对方据此连入正确的对端口。
+- **多网卡机器**：presence 会**每块网卡各发一份**（日志 `multicast on N interface(s)`），
+  公告里带全部网卡地址 `addrs`；对端拨号时按「与我同子网 > 私网其它段 > 链路本地 > 公网 > 回环」
+  逐个尝试，第一个拨不通自动换下一个（`SendPeer: dial ... (cand i/n)`）。
+  `roster.list` 的 `addrs` 字段可看到当前候选与排序。
 - WebUI 可指向任意实例：`http://127.0.0.1:8080/?port=7615` 或 `?port=9165`。
 - 快速看各实例在线表：`node scripts/roster_poll.mjs 7615 A` / `... 9165 B`。
 
@@ -188,6 +192,14 @@ node <chromium>/localim/scripts/ws_e2e.mjs
 打印每个应答信封。期望：前 5 个 `ok:true`，未知方法返回 `-32601`，
 且 `message.send` 后会收到 daemon 广播的聊天事件包（`dir:"ev"`）。
 
+多网卡 / 多网段智能选路另有一个自包含脚本（自行起 `localim_relay` 与两台不同 presence 端口的
+daemon，验证 relay 透传候选地址 + 按候选拨号）：
+
+```bash
+node <chromium>/localim/scripts/ws_e2e_multiroute.mjs
+# 期望：A 经 relay 发现 B（via=relay、addrs 非空且含选中 host），A→B 文字送达 → PASS
+```
+
 ---
 
 ## 9. 常见问题（FAQ）
@@ -197,7 +209,9 @@ node <chromium>/localim/scripts/ws_e2e.mjs
 | `exe 被占用`、链接报 Permission denied | 前一个 daemon 进程未退出，任务管理器结束或 `Stop-Process -Name localim_daemon` |
 | WebUI 连不上 7615 | daemon 未启动，或先起了 dev 守护进程占用 7615（先停掉它） |
 | `udp bind failed` 日志 | 该问题已修复：组播 socket 须 bind `0.0.0.0:port` 再 `JoinGroup`（见 lan_heartbeat.cc） |
-| 同网段看不到设备 | 检查防火墙放行 **UDP 7616 入/出站**；确认组播未被交换机隔离 |
+| 同网段看不到设备 | 检查防火墙放行 **UDP 7616 入/出站**；确认组播未被交换机隔离；多网卡机器看日志 `multicast on N interface(s)` 是否覆盖到目标网卡 |
+| 日志出现 `join group failed` / `multicast on 1 interface(s)` 但网卡有多块 | 该网卡不支持按索引加入组播（部分虚拟网卡/Windows），会自动回退到「缺省接口」单 socket，即只覆盖路由表选中的那一个网段 |
+| 候选地址都拨不通（`peer dial exhausted`） | 对端公告的地址在本机不可达；查 `roster.list` 的 `addrs` 排序，跨网段场景需起 relay 才有候选 |
 | 跨网段找不到设备 | 需要运行 **relay（7618）** 中继，尚未随构建一起产出，见 roadmap |
 | Ubuntu 编译缺头文件 | 安装 `libxtst-dev`（`sudo apt install libxtst-dev`） |
 | 第二实例起不来 / 日志 `bind() failed: Address already in use` | 7615/7617 已被已有实例占用，给新实例加 `--webui-port`/`--peer-port`（presence 仍须同一组播口）；排查占用：`lsof -nP -i :7615`（Linux `ss -lntup`） |

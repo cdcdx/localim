@@ -45,12 +45,20 @@
     "peer": {
       "deviceId": "设备ID",
       "name": "设备名/用户名",
-      "host": "直连IP(同网段为局域网IP, 跨网段为中继可达地址)",
+      "host": "当前选中的直连IP(按选路规则从 addrs 里挑出的最优者)",
       "netmask": "所属网段",
       "via": "lan|relay",
+      "port": "对端 peer 监听口",
+      "addrs": "候选地址数组(按选路排序): 同子网 > 私网其它段 > 链路本地 > 公网 > 回环",
       "lastSeen": "毫秒时间戳",
       "caps": ["chat","media","file","remote","share"]
     },
+    "presence_payload": {
+      "deviceId": "设备ID", "name": "设备名", "platform": "win|mac|linux", "version": "版本",
+      "host": "主地址(最像局域网的那个)", "port": "本机 peer 监听口",
+      "addrs": "数组[{ip,prefix,if}] 本机全部非回环IPv4网卡, 供多网段对端选路"
+    },
+    "route_note": "presence 每块网卡各发一份多播; 收端另记组播源地址作为首选候选; 拨号按候选逐个尝试, 失败换下一个, 拨通者记为优选路由"
     "scan_start_d": { "requireCross": "是否启用中继扫描(默认true)" },
     "peer_found_d": "peer 对象",
     "peer_lost_d": { "deviceId": "设备ID" }

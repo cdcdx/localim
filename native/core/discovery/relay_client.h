@@ -31,6 +31,9 @@ class RelayClient {
   void Start();
   void Stop();
   void SendEnvelope(const std::string& json);
+  // 本机地址/网卡变化后更新注册载荷；已连上则立即重发一帧 register，
+  // 让 relay 侧路由表里的候选地址（多网卡）同步刷新。
+  void SetRegisterPayload(std::string register_payload);
 
  private:
   void Connect();

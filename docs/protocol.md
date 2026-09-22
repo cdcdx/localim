@@ -36,12 +36,32 @@
 
 ## 3. 发现协议
 
-- **同网段**：多播组 `239.255.0.16:7616`，端点周期广播 `{deviceId,name,platform,version,host}`。
+- **同网段**：多播组 `239.255.0.16:7616`，端点周期广播
+  `{deviceId,name,platform,version,host,port,addrs:[{ip,prefix,if}]}`。
+  `addrs` 为本机**全部**非回环 IPv4 网卡（多网卡机器多条）；多播**每块网卡各发一份**，
+  收端回调同时给出这份 presence 的**源地址**（该源地址在本网段必达，选路时优先）。
   收到对端广播 → `Upsert(PeerRecord)` → `discovery.peer_found(*peer)`。
-- **跨网段**：`relay_client` 连 `relay:7618`，先发 `{op:"register", device_id, host}`，
-  再收 `{op:"peer_online"|"peer_offline", …}` 事件，汇入同一 `PeerRegistry`。
+- **跨网段**：`relay_client` 连 `relay:7618`，先发 `{op:"register", deviceId, host, port, addrs}`，
+  再收 `{op:"peer_online"|"peer_offline", …}` 事件，汇入同一 `PeerRegistry`；
+  relay 原样透传 `addrs`（接受 `[ip]` 或 `[{ip,…}]` 两种写法，归一为字符串数组）。
 
 Peer 去重：以 `deviceId` + `via(lan|relay)` 为键；同一设备多网卡/多 via 留多条目。
+
+### 3.1 智能选路（多网卡 / 多网段）
+
+候选地址来自：`addrs`（对端公告 + 历史听到）+ 组播源地址 + `host`。排序规则：
+
+| 优先级 | 条件 |
+| --- | --- |
+| 0 | 与本机某块网卡**同子网**（前缀比较，无需跨路由） |
+| 1 | 私网其它网段（10/8、172.16/12、192.168/16、100.64/10） |
+| 2 | 链路本地 169.254/16 |
+| 3 | 公网 / 其它 |
+| 5 | 回环（仅单机双实例调试兜底） |
+
+拨号按该顺序**逐个尝试**：上一个失败自动换下一个（日志 `SendPeer: dial … (cand i/n)`），
+全部失败才丢弃待发帧；拨通的地址记为本机优选路由，后续优先复用。
+网卡增删（VPN/Wi-Fi 切换）时刷新快照，重建每网卡组播 socket 并重发 presence 与 relay 注册。
 
 ## 4. 消息与历史
 

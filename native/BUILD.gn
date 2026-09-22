@@ -39,6 +39,8 @@ static_library("localim_core") {
 
     "core/discovery/lan_heartbeat.cc",
     "core/discovery/lan_heartbeat.h",
+    "core/discovery/lan_ifaces.cc",
+    "core/discovery/lan_ifaces.h",
     "core/discovery/relay_client.cc",
     "core/discovery/relay_client.h",
     "core/discovery/relay_server.cc",

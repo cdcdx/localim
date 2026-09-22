@@ -134,6 +134,14 @@ void RelayClient::SendRegistration() {
   SendEnvelope(register_payload_);
 }
 
+void RelayClient::SetRegisterPayload(std::string register_payload) {
+  register_payload_ = std::move(register_payload);
+  // 已握手则立刻重发一帧 register（relay 侧按 deviceId 幂等重注册），
+  // 否则等下次连上/重连时自然带上新载荷。
+  if (running_ && socket_ && handshaken_)
+    SendEnvelope(register_payload_);
+}
+
 void RelayClient::SendEnvelope(const std::string& json) {
   if (!socket_)
     return;
