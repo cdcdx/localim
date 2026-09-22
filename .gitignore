@@ -1,0 +1,21 @@
+# ide
+.codex/
+.cursor/
+.github/
+.idea/
+.trae/
+.vscode/
+.workbuddy/
+
+# mac
+.DS_Store
+__pycache__
+
+# python
+.pytest_cache/
+node_modules/
+
+# custom
+out/
+*.err
+*.log

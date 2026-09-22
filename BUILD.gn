@@ -1,0 +1,10 @@
+# LocalIM @ LAN — 顶层 GN 聚合。
+# 真实构建目标在 native/（localim_core 静态库 + localim_daemon 可执行）。
+# 依赖仅限 chromium/src 内组件：//base、//net、//url。不依赖 arupa / nomad 任何目录。
+#
+# 由于 localim 源码树位于 {chromium root}/src 之外，需通过
+# src/localim -> ../localim 符号链接挂载到源码根，方可用 GN 从 //localim 寻址。
+
+group("localim") {
+  deps = [ "//localim/native:native" ]
+}
