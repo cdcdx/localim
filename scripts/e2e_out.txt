@@ -1,0 +1,24 @@
+﻿[0] 互发现: A-ready=true(→B D9B7C097313225B72A690492D8F88A64) B-ready=true(→A 900BBE4D98EF95397E0812A4F392BAC9) global=true
+[0.5] 预热文件传输(建立 peer 通道): OK fileId= ee27798b-c06d-46d2-85da-288a6e917dc4
+[1] A 发起视频: {"ok":true,"callId":"bc6926bc-bbb6-4176-ae94-723a3b9d3649"}
+[2] B 来电 ringing: (offer 可能先到，继续)
+   B 已收到 offer(有会话): OK
+[3] B 接听: {"ok":true}
+[4] A 媒体态: {"sessions":[{"pc":"connected","ice":"connected","local":[],"remote":[]},{"pc":"connected","ice":"connected","local":["audio","video"],"remote":["audio","video"]}],"dom":{"overlay":true,"mainTracks":["audio","video"],"pipTracks":["audio","video"],"mainW":640,"mainR":4}}
+   B 媒体态: {"sessions":[{"pc":"connected","ice":"connected","local":[],"remote":[]},{"pc":"connected","ice":"connected","local":["audio","video"],"remote":["audio","video"]}],"dom":{"overlay":true,"mainTracks":["audio","video"],"pipTracks":["audio","video"],"mainW":640,"mainR":4}}
+[4] A 双向video+DOM=true B 双向video+DOM=true
+=== 阶段1 视频通话: OK（两端双向 video 轨道 + 浮层绑定主画面渲染） ===
+[5] B 应答共享: {"ok":true}
+node : [!] A-share 30s 未 connected stats= [{"state":"new","ice":"new","dtls":"new","cands":[],"rx":0,"tx":0,"kind":[],"
+remDesc":false,"localDesc":true,"rawCands":["offer"]}]
+At line:15 char:1665
++ ... dules\@vscode\ripgrep\bin'; node drv_video_share_e2e.mjs *>&1 | Out-F ...
++                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([!] A-share 30s...ds":["offer"]}]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[!] B-share 30s 未 connected stats= [{"state":"new","ice":"new","dtls":null,"cands":[],"rx":0,"tx":0,"kind":[],"remDesc"
+:false,"localDesc":false,"rawCands":[null]}]
+[6] 共享 A(主播本地视频)=true  B(观众远端渲染)=false
+   A= {"sessions":[{"pc":"new","ice":"new","local":["video"],"remote":["video"]}],"dom":{"overlay":true,"mainTracks":["video"],"pipTracks":[],"mainW":800,"mainR":4}}  B= {"sessions":[{"pc":"new","ice":"new","local":[],"remote":[]}],"dom":{"overlay":true,"mainTracks":[],"pipTracks":[],"mainW":0,"mainR":0}}
+=== 阶段2 共享桌面: FAIL ===
