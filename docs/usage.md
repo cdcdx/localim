@@ -126,10 +126,14 @@ cd <chromium>/localim && node dev/daemon/daemon.mjs          # daemon 自动托�
    跨网段设备需经过 relay。dev 模式下 `scan_start` 会注入一台模拟设备。
 3. **单人聊天**：选设备 → 发文字/语音/图片/视频/文件（媒体与分片走 WebRTC data channel，
    元数据走 WS）。框架内已留信令与数据面，媒体厂家实现见 [roadmap](roadmap.md)。
-4. **自建群组**：`room.create` 建群、`room.members` 拉成员、`message.send` 群发；
-   支持共享桌面（WebRTC 捕获，骨架内已留数据面）。
-5. **远程连接**：对端需装有输入注入器（`native/platform/input_injector_{win,mac,linux}`），
-   随守护进程一体部署。当前骨架层已就绪。
+4. **自建群组**：`room.create` 建群、`room.invite` 拉成员、`message.send` 群发。群共享桌面由房主
+   `startRoomShare(roomId)` 向每个在线成员各建一条独立 PeerConnection 广播本机屏幕（优先同步采集系统音频，
+   失败回退纯画面）。房主浮层可逐个踢出观众；观众可「请求结束共享」由房主裁决。
+5. **群共享内嵌控制**：观众在共享浮层「请求控制」→ 房主「同意控制」后，该观众可在共享画面上直接操作
+   房主鼠标/键盘（经 data channel 回传 → 房主 daemon `input_injector` 注入系统）；观众「结束控制」或
+   房主「撤销控制」即回收权限并解除房主注入武装。房主观众列表标注「· 控制中」。
+6. **远程连接（1:1）**：对端需装有输入注入器（`native/platform/input_injector_{win,mac,linux}`），
+   随守护进程一体部署。
 
 ---
 

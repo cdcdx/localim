@@ -2,7 +2,7 @@ import { el, append } from './elements';
 import { app, toast } from '../store';
 import type { MediaSessionUi } from '../store';
 import { native } from '../client/native_client';
-import { acceptIncomingCall, endRoomShare, endRoomShareViewer, onStreamsChange, requestRoomShareStop, resolveRoomShareStopRequest, roomShareViewers, sendRemoteInput, sessionStreams, startCall } from '../client/webrtc';
+import { acceptIncomingCall, disableShareControl, endRoomShare, endRoomShareViewer, onStreamsChange, requestRoomShareStop, requestShareControl, resolveRoomShareStopRequest, resolveShareControlRequest, revokeShareControl, roomShareViewers, sendRemoteInput, sessionStreams, startCall } from '../client/webrtc';
 
 // 直播态订阅句柄：重画/结束通话时先解绑，避免旧元素泄漏订阅。
 let liveCleanup: (() => void) | null = null;
@@ -46,12 +46,23 @@ export function renderMedia(box: HTMLElement) {
     };
     const actions = el('div', { class: 'call-actions' },
       el('button', { class: 'im-btn danger', onclick: end }, '结束'));
-    // 观众视角的群共享：可向房主请求结束共享；房主有最终停止权。
+    // 观众视角的群共享：可请求远程控制或向房主请求结束共享；房主有最终停止权。
     if (!m.roomShare && m.peer.mode === 'share') {
-      actions.appendChild(el('button', {
-        class: 'im-btn ghost xs',
-        onclick: () => { requestRoomShareStop(callId); },
-      }, '请求结束共享'));
+      if (m.ctrl) {
+        actions.appendChild(el('button', {
+          class: 'im-btn ghost xs',
+          onclick: () => disableShareControl(callId),
+        }, '结束控制'));
+      } else {
+        actions.appendChild(el('button', {
+          class: 'im-btn ghost xs xfer-cancel',
+          onclick: () => { requestShareControl(callId); },
+        }, '请求控制'));
+        actions.appendChild(el('button', {
+          class: 'im-btn ghost xs',
+          onclick: () => { requestRoomShareStop(callId); },
+        }, '请求结束共享'));
+      }
     }
 
     // 语音：无视频，隐藏视频区，用状态指示占位。
@@ -85,7 +96,7 @@ export function renderMedia(box: HTMLElement) {
     append(card, title, vids, actions);
     // 房主视角的群共享控制条：观众列表可逐个踢出；待办请求可同意/忽略。
     if (m.roomShare) renderRoomShareBar(card, callId, m);
-    if (m.peer.mode === 'remote') renderRemotePanel(card, main);
+    if (m.peer.mode === 'remote' || m.ctrl) renderRemotePanel(card, main);
     wrap.appendChild(overlay(card));
   };
 }
@@ -107,10 +118,14 @@ function renderRoomShareBar(card: HTMLElement, roomId: string, m: MediaSessionUi
     el('span', {}, `观众 ${viewers.length} 人`),
     el('span', { class: 'muted xs' }, '房主可结束或逐个踢出')));
   const list = el('div', { class: 'share-members' });
+  const controllers = new Set(m.controllers ?? []);
   for (const id of viewers) {
-    append(list, el('div', { class: 'share-member' },
-      el('span', {}, app.state.peers.get(id)?.name ?? id),
-      el('button', { class: 'im-btn ghost xs xfer-cancel', onclick: () => void endRoomShareViewer(roomId, id) }, '踢出')));
+    const ctl = controllers.has(id);
+    const row = el('div', { class: 'share-member' },
+      el('span', {}, `${app.state.peers.get(id)?.name ?? id}${ctl ? ' · 控制中' : ''}`),
+      el('button', { class: 'im-btn ghost xs xfer-cancel', onclick: () => void endRoomShareViewer(roomId, id) }, '踢出'));
+    if (ctl) row.appendChild(el('button', { class: 'im-btn ghost xs', onclick: () => { revokeShareControl(roomId, id); } }, '撤销控制'));
+    append(list, row);
   }
   if (list.childNodes.length) bar.appendChild(list);
   else append(bar, el('div', { class: 'muted xs' }, '暂无在线观众'));
@@ -119,6 +134,12 @@ function renderRoomShareBar(card: HTMLElement, roomId: string, m: MediaSessionUi
       el('span', {}, `${m.shareReq.name} 请求结束共享`),
       el('button', { class: 'im-btn xs', onclick: () => { resolveRoomShareStopRequest(roomId, m.shareReq!.from, true); } }, '同意停止'),
       el('button', { class: 'im-btn ghost xs xfer-cancel', onclick: () => { resolveRoomShareStopRequest(roomId, m.shareReq!.from, false); } }, '忽略')));
+  }
+  if (m.ctrlReq) {
+    append(bar, el('div', { class: 'share-req' },
+      el('span', {}, `${m.ctrlReq.name} 请求控制共享屏幕`),
+      el('button', { class: 'im-btn xs', onclick: () => { resolveShareControlRequest(m.ctrlReq!.from, true); } }, '同意控制'),
+      el('button', { class: 'im-btn ghost xs xfer-cancel', onclick: () => { resolveShareControlRequest(m.ctrlReq!.from, false); } }, '拒绝')));
   }
   card.appendChild(bar);
 }

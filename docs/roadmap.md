@@ -179,6 +179,25 @@ B/C 各收到 `media.call_invite`(share) 振铃浮层 → `acceptIncomingCall`�
     `endRoomShareViewer(roomId, memberId)` 只挂断指定观众（其余观众与整场不受影响；观众被清空才结束）。
     浮层 UI：房主 `renderRoomShareBar` 列出观众并可逐个踢出；观众侧加「请求结束共享」按钮。
 
+**2026-09 追加（群共享内嵌远程控制，`scripts/drv_group_share_ctrl_e2e.mjs` 全 PASS）**：
+观众在共享浮层「请求控制」→ 经 daemon 中继 `media.share_control_request` 到房主，房主浮层出 `ctrlReq` 待办；
+「同意控制」`resolveShareControlRequest(member, true)` 授权并 `remote_host{on:true}` 武装本机注入器，
+「拒绝」仅回 `share_control_grant{approved:false}`。获授权的观众 `enableShareControl` 在本端共享会话上
+补开 data channel（新增 SCTP m-line → 观众重新 offer、房主按通用 renegotiation 回 answer 使通道 open），
+此后在共享画面上的鼠标/键盘经该通道回传 → 房主 WebUI 转 `media.remote_input` → daemon `input_injector` 注入系统。
+控制权闭环：观众「结束控制」发 `share_control_release`；房主可 `revokeShareControl(roomId,member)` 撤销（发 `share_control_revoke`）；
+房主以 `ctrlMembers`(roomId→成员集合) 记账，集合走空即 `remote_host{on:false}` 解除武装；被踢出/整场结束同样摘除控制权。
+浮层 UI：房主观众列表标注「· 控制中」并可一键「撤销控制」；观众侧「请求控制」/「结束控制」互斥切换。
+排障要点：
+37. **重复授权叠加 SCTP 通道**——`attachRemoteDatachannel` 原无条件 `createDataChannel`，观众「结束控制」后再
+   「请求控制」会叠加多条通道并重复 renegotiation；改为已有未关闭通道直接复用（`created=false` 时不再 `sendOffer`），
+   e2e 以房主侧 inbound `m=offer` 计数不变断言通道复用。
+38. **注入武装未随控制权回收**——原仅授权时 `remote_host{on:true}`、整场结束才 off；观众退出控制后房主仍处可被注入态。
+   新增释放/撤销/踢出/整场结束四条回收路径统一走 `syncShareControllers`，控制者集合走空即解除武装；
+   e2e 断言退出控制后观众再回传输入被拒（daemon 日志 `hosted=0 injected=0`）。
+39. **DOM 键盘码 `KeyA` 未映射**——`input_injector_win.cc` 原判 `code[1]`/`code[2]` 错位致字母键取不到 VK；
+   按 `Key`+字母/数字后缀正确还原 VK_A..Z / VK_0..9。
+
 **2026-09 追加（离线消息投递端到端打通，`scripts/drv_offline_msg_e2e.mjs` 全 PASS）**：
 单聊对端不在线时，`message.send` 不再静默丢弃而是按设备入 `offline_q_`（`daemon.cc`，FIFO 上限
 `kOfflineQueueCap`）；对方（重新）上线触达 `OnLanPeer`/`OnRelayEvent` 时 `MaybeRedeliver` →
@@ -198,6 +217,7 @@ A 侧全会话按 nonce 扫描到 `delivered`。排障要点：
 - [x] 群 mesh：房主广播/成员订阅，离线次级接替（离线次级接替仍为后续优化）
 - [x] relay 服务端（独立小服务 `localim_relay`）多网关注册与路由表
 - [x] 群聊共享桌面（media 目标为 roomId；房主一人采集屏幕向每在线成员各自独立通道广播）
+- [x] 群共享内嵌远程控制（观众经房主逐次授权后操作共享屏，输入经 data channel 回传被控端注入；退出/撤销即解除武装）
 
 **2026-09 追加（跨网段中继服务端到端打通，`scripts/drv_relay_e2e.mjs` 四阶段全 PASS）**：
 新增独立小服务 `localim_relay`（`core/discovery/relay_server.*` + `app/relay_main.cc`，复用

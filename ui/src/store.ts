@@ -18,8 +18,14 @@ export interface MediaSessionUi {
   rtc?: RTCSessionDescriptionInit | null;
   /** 群共享浮层（房主视角，callId 即 roomId）：结束按钮走 endRoomShare 而非单会话挂断。 */
   roomShare?: boolean;
-  /** 群共享：有观众请求停止时的待办（房主视角，name=请求成员显示名）。 */
+  /** 群共享：有观众请求停止时的待办（房主视角，from=请求成员 deviceId）。 */
   shareReq?: { from: string; name: string };
+  /** 群共享：有观众请求远程控制时的待办（房主视角，from=请求成员 deviceId）。 */
+  ctrlReq?: { from: string; name: string };
+  /** 群共享观众端：本端是否已获房主授权、正对共享屏幕进行远程控制。 */
+  ctrl?: boolean;
+  /** 群共享房主视角：当前正对该共享屏进行远程控制的观众 deviceId 列表（房主可逐个撤销）。 */
+  controllers?: string[];
 }
 
 export interface AppState {

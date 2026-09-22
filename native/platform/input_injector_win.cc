@@ -21,8 +21,12 @@ WORD VkFromCode(const std::string& code) {
   auto it = kMap.find(code);
   if (it != kMap.end())
     return it->second;
-  if (code.size() == 4 && code[0] == 'K' && code[2] == 'e')
-    return static_cast<WORD>('A' + (code[1] - 'A'));  // "KeyX"
+  // DOM KeyboardEvent.code 形如 "KeyA"/"Key1"：前缀 Key，末字符即虚拟键码(VK_A..=ASCII)。
+  if (code.size() == 4 && code[0] == 'K' && code[1] == 'e' && code[2] == 'y') {
+    const char c = code[3];
+    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+      return static_cast<WORD>(c);
+  }
   return 0;
 }
 

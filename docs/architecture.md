@@ -48,8 +48,10 @@ LocalIM 是**两层**结构：
 | 业务 | 信令（守护进程） | 数据（WebUI） |
 | --- | --- | --- |
 | 语音/视频 | 7615←→7617 offer/answer/ice | RTCPeerConnection media flows |
-| 共享桌面 | share_start/stop | getDisplayMedia → track → PeerConnection |
-| 远程连接 | remote_start/remote_input | canvas 接收画面 + data channel 下发输入 |
+| 共享桌面（1:1） | call_invite/offer/answer/ice `mode=share` | getDisplayMedia → track → PeerConnection |
+| 群共享桌面 | call_invite/offer/answer/ice + room_share_stop_request/ack | 房主向每在线成员各建一条独立 PeerConnection |
+| 远程连接（1:1） | call_invite `mode=remote` + remote_host/remote_input | 接收画面 + data channel 下发输入 → input_injector |
+| 群共享内嵌控制 | share_control_request/grant/release/revoke | 授权后观众补开 data channel 回传输入 → input_injector |
 | 文件传输 | transfer_begin/ack + chunk_header | data channel 二进制分片 |
 
 > 信令中继：WebUI 的 `media.*`/`file.*` 经本机 daemon(7615) 收到后，由 `SendPeerSignal`

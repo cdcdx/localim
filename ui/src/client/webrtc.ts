@@ -374,6 +374,9 @@ const roomShares = new Map<string, RoomShare>();
 const roomShareByCallId = new Map<string, string>(); // callId -> roomId
 // 群共享成员控制：观众请求停止的待办（roomId -> 请求成员 deviceId，房主一次只处理最新一条）。
 const stopReqMembers = new Map<string, string>();
+// 群共享远程控制：房主视角「正在控制本场共享屏」的成员集合（roomId -> 成员 deviceId 集合）。
+// 仅房主维护；授权即入队、观众主动退出/被撤销/被踢出即出队，集合走空时解除本机注入武装。
+const ctrlMembers = new Map<string, Set<string>>();
 
 function newSession(callId: string, peerId: string, mode: MediaMode): PeerSession {
   const s = new PeerSession(callId, peerId, mode);
@@ -564,6 +567,45 @@ export function initWebrtc() {
     const it = d as { approved: boolean };
     toast(it.approved ? '群主已同意，即将停止共享' : '群主忽略了停止请求');
   });
+  // 群共享远程控制：观众请求控制 → 房主浮层弹待办；房主授权/拒绝 → 观众收到结果并开 control 通道。
+  native.on('media', 'share_control_request', (_m, d) => {
+    const it = d as { from: string };
+    const roomId = roomShareForMember(it.from);
+    if (!roomId) return; // 我非该观众所在共享的房主，忽略
+    const name = app.state.peers.get(it.from)?.name ?? it.from;
+    if (app.state.media?.roomShare && app.state.media.callId === roomId) {
+      app.patch({ media: { ...app.state.media, ctrlReq: { from: it.from, name } } });
+    } else {
+      toast(`${name} 请求控制共享屏幕`);
+    }
+  });
+  native.on('media', 'share_control_grant', (_m, d) => {
+    const it = d as { approved: boolean };
+    if (it.approved) {
+      const m = app.state.media;
+      if (m && m.peer.mode === 'share' && m.peer.deviceId) {
+        void enableShareControl(m.callId, m.peer.deviceId);
+      }
+    } else {
+      toast('房主未同意本次控制请求');
+    }
+  });
+  // 观众主动退出控制：房主摘除其控制权；无人控制则解除本机注入武装（避免离开后仍可被注入）。
+  native.on('media', 'share_control_release', (_m, d) => {
+    const it = d as { from: string };
+    const roomId = roomShareForMember(it.from);
+    if (!roomId) return;
+    ctrlMembers.get(roomId)?.delete(it.from);
+    syncShareControllers(roomId, { disarm: true });
+    toast(`${app.state.peers.get(it.from)?.name ?? it.from} 已结束控制`);
+  });
+  // 房主撤销观众控制权：观众立即退出控制模式，其输入不再回传本机。
+  native.on('media', 'share_control_revoke', () => {
+    const m = app.state.media;
+    if (!m || m.peer.mode !== 'share') return;
+    disableShareControl(m.callId);
+    toast('房主已撤销你的控制权');
+  });
 }
 
 export async function startCall(peerId: string, mode: MediaMode): Promise<PeerSession> {
@@ -640,13 +682,14 @@ export async function startRoomShare(roomId: string): Promise<{ count: number }>
   return { count };
 }
 
-/** 结束群共享：挂断所有观众会话、停采屏幕、移除本端共享浮层。 */
+/** 结束群共享：挂断所有观众会话、停采屏幕、拆卸控制注入、移除本端共享浮层。 */
 export function endRoomShare(roomId: string) {
   const share = roomShares.get(roomId);
   if (share) {
     for (const s of share.viewers.values()) s.hangup();
     share.stream.getTracks().forEach((t) => t.stop());
   }
+  native.send('media', 'remote_host', { on: 'false' }); // 观众停止注入本机
   for (const [cid, rid] of [...roomShareByCallId]) if (rid === roomId) {
     const s = sessions.get(cid);
     try { s?.pc.close(); } catch {}
@@ -655,6 +698,7 @@ export function endRoomShare(roomId: string) {
     roomShareByCallId.delete(cid);
   }
   roomShares.delete(roomId);
+  ctrlMembers.delete(roomId);
   clearSessionStreams(roomId);
   app.patch({ media: null });
 }
@@ -692,8 +736,9 @@ export function endRoomShareViewer(roomId: string, memberId: string): boolean {
     }
   }
   stopReqMembers.delete(roomId);
+  ctrlMembers.get(roomId)?.delete(memberId); // 被踢出的观众一并失去控制权
   if (share.viewers.size === 0) endRoomShare(roomId); // 观众被清空则结束整场共享
-  else toast(`已踢出 1 位观众，剩余 ${share.viewers.size} 人`);
+  else { syncShareControllers(roomId, { disarm: true }); toast(`已踢出 1 位观众，剩余 ${share.viewers.size} 人`); }
   return true;
 }
 
@@ -720,13 +765,99 @@ export function resolveRoomShareStopRequest(roomId: string, memberId: string, ap
   return true;
 }
 
-/** 远程/共享桌面里，主动建 data channel 用于回传输入（本端是观看者/操控者）。 */
-export async function attachRemoteDatachannel(callId: string, peerId: string): Promise<PeerSession> {
+/** 取某个共享观众成员所在的群共享 roomId（本机须为其房主；非该共享成员反查不到）。 */
+function roomShareForMember(memberId: string): string | undefined {
+  for (const [rid, share] of roomShares) if (share.viewers.has(memberId)) return rid;
+  return undefined;
+}
+
+/** 观众请求控制共享屏幕：向房主(id=媒体浮层对端)发控制请求，等房主授权。 */
+export function requestShareControl(callId: string): boolean {
+  const hostId = app.state.media?.peer?.deviceId;
+  if (!hostId) return false;
+  native.send('media', 'share_control_request', { to: hostId, roomId: callId });
+  toast('已请求控制共享屏幕，等待房主授权');
+  return true;
+}
+
+/** 观众获授权后进入控制模式：在本端共享会话上补开 data channel 回传输入，并切到控制浮层。 */
+export async function enableShareControl(callId: string, hostId: string): Promise<string> {
+  try {
+    const { session, created } = await attachRemoteDatachannel(callId, hostId);
+    // 新增 data channel 需重新协商（新增 SCTP m-line）才能真正建立：操作端重新发 offer，
+    // 被控端 onSignal('offer') 已通用支持 renegotiation 并回 answer；复用既有通道则无需再协商。
+    if (created) await session.sendOffer();
+    app.patch({ media: app.state.media ? { ...app.state.media, ctrl: true } : app.state.media });
+    return 'ok';
+  } catch (e) {
+    const msg = (e && (e as Error).message) || String(e);
+    toast('控制通道建立失败: ' + msg);
+    return 'err:' + msg;
+  }
+}
+
+/** 观众退出控制模式（保留观看）：通知房主释放控制权（房主据此解除注入武装），通道留住待复用。 */
+export function disableShareControl(callId?: string): void {
+  const m = app.state.media;
+  const hostId = m?.peer?.deviceId;
+  const cid = callId ?? m?.callId;
+  if (hostId && cid) native.send('media', 'share_control_release', { to: hostId, roomId: cid });
+  app.patch({ media: app.state.media ? { ...app.state.media, ctrl: false } : app.state.media });
+}
+
+/** 房主处理观众的控制请求：approve 则授权并武装本机注入器（观众随即开通道），否则仅通知拒绝。 */
+export function resolveShareControlRequest(memberId: string, approve: boolean, roomId?: string): boolean {
+  const rid = roomId ?? roomShareForMember(memberId);
+  if (!rid) return false;
+  if (approve) {
+    let set = ctrlMembers.get(rid);
+    if (!set) { set = new Set(); ctrlMembers.set(rid, set); }
+    set.add(memberId);
+    native.send('media', 'remote_host', { on: 'true' }); // 被控端(房主)armed：观众输入可注入本机系统
+  }
+  native.send('media', 'share_control_grant', { to: memberId, roomId: rid, approved: approve });
+  syncShareControllers(rid, { clearReq: true });
+  return true;
+}
+
+/** 房主撤销某观众的控制权：通知其退出控制模式，控制者走空则解除本机注入武装。 */
+export function revokeShareControl(roomId: string, memberId: string): boolean {
+  if (!roomShares.has(roomId)) return false;
+  const set = ctrlMembers.get(roomId);
+  if (!set || !set.delete(memberId)) return false;
+  native.send('media', 'share_control_revoke', { to: memberId, roomId });
+  syncShareControllers(roomId, { disarm: true });
+  toast(`已撤销 ${app.state.peers.get(memberId)?.name ?? memberId} 的控制权`);
+  return true;
+}
+
+/** 房主视角：当前正控制本场共享屏的成员列表（非房主或无人控制返回空表）。 */
+export function roomShareControllers(roomId: string): string[] {
+  return [...(ctrlMembers.get(roomId) ?? [])];
+}
+
+/** 控制者集合变化后同步浮层（触发重绘）；opts.disarm 且已无控制者时解除本机注入武装。
+ *  仅「回收控制权」的路径才传 disarm，避免拒绝请求等无关操作误关本机注入。 */
+function syncShareControllers(roomId: string, opts?: { clearReq?: boolean; disarm?: boolean }) {
+  const list = roomShareControllers(roomId);
+  const m = app.state.media;
+  if (m?.roomShare && m.callId === roomId) {
+    app.patch({ media: { ...m, controllers: list, ...(opts?.clearReq ? { ctrlReq: undefined } : {}) } });
+  }
+  if (opts?.disarm && list.length === 0) native.send('media', 'remote_host', { on: 'false' });
+}
+
+/** 远程/共享桌面里，主动建 data channel 用于回传输入（本端是观看者/操控者）。
+ *  已有未关闭通道则直接复用（created=false），避免重复授权叠加多条 SCTP 通道。 */
+export async function attachRemoteDatachannel(
+  callId: string, peerId: string,
+): Promise<{ session: PeerSession; created: boolean }> {
   const s = sessions.get(callId) ?? newSession(callId, peerId, 'remote');
+  if (s.dc && s.dc.readyState !== 'closed') return { session: s, created: false };
   const dc = s.pc.createDataChannel(s.dcLabel);
   s.attachChannel?.(dc);
   s.dc = dc;
-  return s;
+  return { session: s, created: true };
 }
 
 /** 操控端(观看者)把输入事件经 data channel 回传被控端（被控端转发给本机 daemon 注入）。 */

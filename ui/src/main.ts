@@ -1,6 +1,6 @@
 import { app } from './store';
 import { initNativeHooks, native } from './client/native_client';
-import { initWebrtc, sendFileTo, startCall, startRoomShare, endRoomShare, endRoomShareViewer, requestRoomShareStop, resolveRoomShareStopRequest, roomShareViewers, acceptIncomingCall, mediaDebug, hangupDebug, debugPcs, cancelFileByFileId, sessionStreams, sendRemoteInput, roomShareViewerCount, interruptFile, resumeFile, canResumeFile, transferDebug, framesDebug } from './client/webrtc';
+import { initWebrtc, sendFileTo, startCall, startRoomShare, endRoomShare, endRoomShareViewer, requestRoomShareStop, requestShareControl, resolveRoomShareStopRequest, resolveShareControlRequest, revokeShareControl, disableShareControl, roomShareViewers, roomShareControllers, acceptIncomingCall, mediaDebug, hangupDebug, debugPcs, cancelFileByFileId, sessionStreams, sendRemoteInput, roomShareViewerCount, interruptFile, resumeFile, canResumeFile, transferDebug, framesDebug } from './client/webrtc';
 import { login } from './views/login';
 import { renderRoster } from './views/roster';
 import { renderChat } from './views/chat';
@@ -46,4 +46,4 @@ render();
 native.connect();
 
 // 供 dev 回显/调试 + 端到端脚本注入（login/sendFileTo/startCall/startRoomShare 供 CDP 驱动调用）
-(globalThis as any).__localim = { app, native, login, sendFileTo, startCall, startRoomShare, endRoomShare, endRoomShareViewer, requestRoomShareStop, resolveRoomShareStopRequest, roomShareViewers, acceptIncomingCall, mediaDebug, hangupDebug, debugPcs, cancelFileByFileId, sessionStreams, sendRemoteInput, roomShareViewerCount, interruptFile, resumeFile, canResumeFile, transferDebug, framesDebug };
+(globalThis as any).__localim = { app, native, login, sendFileTo, startCall, startRoomShare, endRoomShare, endRoomShareViewer, requestRoomShareStop, requestShareControl, resolveRoomShareStopRequest, resolveShareControlRequest, revokeShareControl, disableShareControl, roomShareViewers, roomShareControllers, acceptIncomingCall, mediaDebug, hangupDebug, debugPcs, cancelFileByFileId, sessionStreams, sendRemoteInput, roomShareViewerCount, interruptFile, resumeFile, canResumeFile, transferDebug, framesDebug };
